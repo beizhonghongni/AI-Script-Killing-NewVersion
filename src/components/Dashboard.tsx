@@ -135,11 +135,11 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
       {/* 主要内容区域 */}
       <div className="container mx-auto px-4 py-6">
-        <div className="grid grid-cols-12 gap-6 h-[calc(100vh-140px)]">
+        <div className="grid grid-cols-12 gap-6">
           {/* 左侧栏 */}
           <div className="col-span-4 space-y-6">
             {/* 好友列表 */}
-            <div className="h-1/2">
+            <div className="h-80">
               <div className="card h-full flex flex-col">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold text-white flex items-center">
@@ -157,7 +157,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
             </div>
 
             {/* 收藏剧本 */}
-            <div className="h-1/2">
+            <div className="h-80">
               <div className="card h-full flex flex-col">
                 <div className="flex items-center justify-between mb-4">
                   <h2 className="text-xl font-semibold text-white flex items-center">
@@ -201,7 +201,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
           {/* 右侧栏 - 房间区域 */}
           <div className="col-span-8">
-            <div className="card h-full flex flex-col">
+            <div className="card h-[calc(100vh-200px)] flex flex-col">
               <div className="flex items-center justify-between mb-6">
                 <h2 className="text-2xl font-semibold text-white flex items-center">
                   <span className="mr-3">🎮</span>

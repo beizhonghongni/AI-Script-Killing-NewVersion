@@ -22,6 +22,7 @@ export interface CollectedScript {
   characters: Character[];
   roundContents: RoundContent[];
   plotRequirement: string;
+  personalScripts?: { [characterId: string]: PersonalScript }; // 个人剧本数据
   collectedAt: number;
   collectedBy: string;
 }
