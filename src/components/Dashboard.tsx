@@ -5,6 +5,8 @@ import { User, Room } from '@/types';
 import FriendsList from './FriendsList';
 import RoomsList from './RoomsList';
 import CreateRoomModal from './CreateRoomModal';
+import ImportScriptModal from './ImportScriptModal';
+import TestImportModal from './TestImportModal';
 
 interface DashboardProps {
   user: User;
@@ -13,6 +15,8 @@ interface DashboardProps {
 
 export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [showCreateRoom, setShowCreateRoom] = useState(false);
+  const [showImportScript, setShowImportScript] = useState(false);
+  const [showTestImport, setShowTestImport] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [friends, setFriends] = useState([]);
   const [selectedCollectedScript, setSelectedCollectedScript] = useState<any>(null);
@@ -109,6 +113,12 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     setShowCreateRoom(true);
   };
 
+  // 处理导入剧本成功
+  const handleImportSuccess = () => {
+    // 刷新用户数据以获取最新的收藏剧本
+    fetchUserData();
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-game-bg via-slate-800 to-slate-900">
       {/* 头部导航 */}
@@ -164,9 +174,25 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                     <span className="mr-2">📚</span>
                     收藏剧本
                   </h2>
-                  <span className="text-sm text-gray-400">
-                    {currentUser.collectedScripts?.length || 0} 个
-                  </span>
+                  <div className="flex items-center space-x-3">
+                    <button
+                      onClick={() => setShowImportScript(true)}
+                      className="text-sm bg-game-accent hover:bg-opacity-80 text-white px-3 py-1 rounded transition-colors"
+                      title="导入外部PDF剧本"
+                    >
+                      📥 PDF导入
+                    </button>
+                    <button
+                      onClick={() => setShowTestImport(true)}
+                      className="text-sm bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded transition-colors"
+                      title="文本导入测试"
+                    >
+                      🧪 测试导入
+                    </button>
+                    <span className="text-sm text-gray-400">
+                      {currentUser.collectedScripts?.length || 0} 个
+                    </span>
+                  </div>
                 </div>
                 <div className="flex-1 overflow-y-auto">
                   {(!currentUser.collectedScripts || currentUser.collectedScripts.length === 0) ? (
@@ -233,6 +259,24 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           }}
           onSubmit={handleCreateRoom}
           collectedScript={selectedCollectedScript}
+        />
+      )}
+
+      {/* 导入剧本模态框 */}
+      {showImportScript && (
+        <ImportScriptModal
+          isOpen={showImportScript}
+          onClose={() => setShowImportScript(false)}
+          onSuccess={handleImportSuccess}
+        />
+      )}
+
+      {/* 测试导入模态框 */}
+      {showTestImport && (
+        <TestImportModal
+          isOpen={showTestImport}
+          onClose={() => setShowTestImport(false)}
+          onSuccess={handleImportSuccess}
         />
       )}
     </div>
