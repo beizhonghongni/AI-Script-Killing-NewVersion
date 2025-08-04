@@ -60,8 +60,12 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       
       const data = await response.json();
       if (data.success) {
-        setRooms([...rooms, data.room]);
+        // 更新房间列表，新房间添加到最前面
+        setRooms([data.room, ...rooms]);
         setShowCreateRoom(false);
+        
+        // 自动进入新创建的房间
+        window.location.href = `/room/${data.room.id}`;
       }
     } catch (error) {
       console.error('Failed to create room:', error);

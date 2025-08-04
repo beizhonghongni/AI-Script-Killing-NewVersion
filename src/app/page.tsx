@@ -9,16 +9,16 @@ export default function Home() {
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // 页面加载时检查本地存储的登录状态
+  // 页面加载时检查会话存储的登录状态
   useEffect(() => {
-    const savedUser = localStorage.getItem('currentUser');
+    const savedUser = sessionStorage.getItem('currentUser');
     if (savedUser) {
       try {
         const user = JSON.parse(savedUser);
         setCurrentUser(user);
       } catch (error) {
         console.error('Failed to parse saved user:', error);
-        localStorage.removeItem('currentUser');
+        sessionStorage.removeItem('currentUser');
       }
     }
     setLoading(false);
@@ -26,8 +26,8 @@ export default function Home() {
   
   const handleLogin = (user: User) => {
     setCurrentUser(user);
-    // 保存登录状态到本地存储
-    localStorage.setItem('currentUser', JSON.stringify(user));
+    // 保存登录状态到会话存储
+    sessionStorage.setItem('currentUser', JSON.stringify(user));
   };
   
   const handleLogout = async () => {
@@ -47,7 +47,7 @@ export default function Home() {
     }
     
     setCurrentUser(null);
-    localStorage.removeItem('currentUser');
+    sessionStorage.removeItem('currentUser');
   };
   
   // 加载中状态

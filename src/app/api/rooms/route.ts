@@ -7,9 +7,14 @@ import { Room } from '@/types';
 export async function GET() {
   try {
     const rooms = getRooms();
+    // 按创建时间倒序排列，新房间在最上面
+    const sortedRooms = rooms
+      .filter(room => room.isOnline)
+      .sort((a, b) => b.createdAt - a.createdAt);
+    
     return NextResponse.json({ 
       success: true, 
-      rooms: rooms.filter(room => room.isOnline)
+      rooms: sortedRooms
     });
   } catch (error) {
     return NextResponse.json({ success: false, error: 'Failed to get rooms' }, { status: 500 });
