@@ -15,11 +15,42 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [friends, setFriends] = useState([]);
+  const [selectedCollectedScript, setSelectedCollectedScript] = useState<any>(null);
+  const [currentUser, setCurrentUser] = useState<User>(user);
 
   useEffect(() => {
     fetchRooms();
     fetchFriends();
+    fetchUserData();
+    
+    // 添加自定义事件监听器来刷新用户数据
+    const handleUserDataUpdate = () => {
+      fetchUserData();
+    };
+    
+    window.addEventListener('userDataUpdated', handleUserDataUpdate);
+    
+    return () => {
+      window.removeEventListener('userDataUpdated', handleUserDataUpdate);
+    };
   }, []);
+
+  // 获取最新的用户数据
+  const fetchUserData = async () => {
+    try {
+      const response = await fetch(`/api/users/${user.id}/profile`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success) {
+          setCurrentUser(data.user);
+          // 更新 sessionStorage 中的用户数据
+          sessionStorage.setItem('currentUser', JSON.stringify(data.user));
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch user data:', error);
+    }
+  };
 
   const fetchRooms = async () => {
     try {
@@ -35,7 +66,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
 
   const fetchFriends = async () => {
     try {
-      const response = await fetch(`/api/users/${user.id}/friends`);
+      const response = await fetch(`/api/users/${currentUser.id}/friends`);
       const data = await response.json();
       if (data.success) {
         setFriends(data.friends);
@@ -54,7 +85,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
         },
         body: JSON.stringify({
           ...roomData,
-          hostId: user.id
+          hostId: currentUser.id
         }),
       });
       
@@ -72,6 +103,12 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     }
   };
 
+  // 从收藏剧本创建游戏
+  const createGameFromCollectedScript = (collectedScript: any) => {
+    setSelectedCollectedScript(collectedScript);
+    setShowCreateRoom(true);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-game-bg via-slate-800 to-slate-900">
       {/* 头部导航 */}
@@ -83,7 +120,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                 LLM推理大师
               </h1>
               <span className="text-gray-400">|</span>
-              <span className="text-white">欢迎, {user.username}</span>
+              <span className="text-white">欢迎, {currentUser.username}</span>
             </div>
             
             <button
@@ -128,11 +165,11 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                     收藏剧本
                   </h2>
                   <span className="text-sm text-gray-400">
-                    {user.savedScripts?.length || 0} 个
+                    {currentUser.collectedScripts?.length || 0} 个
                   </span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  {user.savedScripts?.length === 0 ? (
+                  {(!currentUser.collectedScripts || currentUser.collectedScripts.length === 0) ? (
                     <div className="text-center py-8">
                       <div className="text-4xl mb-3">📖</div>
                       <p className="text-gray-400 text-sm">暂无收藏剧本</p>
@@ -140,10 +177,19 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {user.savedScripts?.map((scriptId, index) => (
-                        <div key={scriptId} className="bg-gray-800 rounded-lg p-3 hover:bg-gray-700 transition-colors cursor-pointer">
-                          <h4 className="text-white text-sm font-medium">剧本 #{index + 1}</h4>
-                          <p className="text-gray-400 text-xs mt-1">点击查看详情</p>
+                      {currentUser.collectedScripts.map((script) => (
+                        <div 
+                          key={script.id} 
+                          className="bg-gray-800 rounded-lg p-3 hover:bg-gray-700 transition-colors cursor-pointer"
+                          onClick={() => createGameFromCollectedScript(script)}
+                        >
+                          <h4 className="text-white text-sm font-medium">{script.title}</h4>
+                          <p className="text-gray-400 text-xs mt-1">
+                            {script.rounds}轮 · {new Date(script.collectedAt).toLocaleDateString()}
+                          </p>
+                          <p className="text-gray-500 text-xs mt-1 line-clamp-2">
+                            {script.background}
+                          </p>
                         </div>
                       ))}
                     </div>
@@ -181,8 +227,12 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       {/* 创建房间模态框 */}
       {showCreateRoom && (
         <CreateRoomModal
-          onClose={() => setShowCreateRoom(false)}
+          onClose={() => {
+            setShowCreateRoom(false);
+            setSelectedCollectedScript(null);
+          }}
           onSubmit={handleCreateRoom}
+          collectedScript={selectedCollectedScript}
         />
       )}
     </div>

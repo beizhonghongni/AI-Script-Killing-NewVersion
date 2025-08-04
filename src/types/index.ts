@@ -6,8 +6,24 @@ export interface User {
   isOnline: boolean;
   friends: string[]; // 好友ID列表
   savedScripts: string[]; // 收藏的剧本ID列表
+  collectedScripts?: CollectedScript[]; // 收藏的游戏剧本
   chatHistory: { [friendId: string]: ChatMessage[] };
   gameHistory: GameRecord[];
+}
+
+// 收藏剧本类型
+export interface CollectedScript {
+  id: string;
+  originalScriptId: string;
+  originalGameId: string;
+  title: string;
+  rounds: number;
+  background: string;
+  characters: Character[];
+  roundContents: RoundContent[];
+  plotRequirement: string;
+  collectedAt: number;
+  collectedBy: string;
 }
 
 // AI NPC 角色类型

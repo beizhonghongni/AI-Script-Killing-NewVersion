@@ -24,7 +24,7 @@ export async function GET() {
 // 创建房间
 export async function POST(request: NextRequest) {
   try {
-    const { name, hostId } = await request.json();
+    const { name, hostId, collectedScript } = await request.json();
     
     const room: Room = {
       id: generateId('room'),
@@ -36,6 +36,11 @@ export async function POST(request: NextRequest) {
       status: 'waiting',
       createdAt: Date.now()
     };
+
+    // 如果是从收藏剧本创建，添加剧本信息
+    if (collectedScript) {
+      (room as any).collectedScript = collectedScript;
+    }
     
     createRoom(room);
     

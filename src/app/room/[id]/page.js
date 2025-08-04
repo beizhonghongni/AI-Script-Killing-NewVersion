@@ -29,6 +29,10 @@ export default function RoomPage() {
   const [readyPlayers, setReadyPlayers] = useState(new Set()); // 已准备的玩家
   const [showGameSummary, setShowGameSummary] = useState(false); // 显示游戏复盘
   const [gameSummary, setGameSummary] = useState(null); // 游戏复盘数据
+  const [startingGame, setStartingGame] = useState(false); // 游戏开始加载状态
+  const [showCollectScript, setShowCollectScript] = useState(false); // 显示收藏剧本选项
+  const [isScriptCollected, setIsScriptCollected] = useState(false); // 是否已收藏剧本
+  const [pollingInterval, setPollingInterval] = useState(null); // 轮询定时器
   const chatContainerRef = useRef(null); // 聊天容器引用
   const plotContainerRef = useRef(null); // 剧情容器引用
 
@@ -44,6 +48,78 @@ export default function RoomPage() {
 
     fetchRoomData();
   }, [params.id, router]);
+
+  // 启动实时同步轮询
+  useEffect(() => {
+    if (room && currentUser) {
+      // 清除之前的轮询
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+
+      let interval;
+      
+      if (room.status === 'playing' && room.gameId) {
+        console.log('开始轮询游戏状态...');
+        // 游戏中：轮询游戏数据
+        interval = setInterval(() => {
+          fetchGameData(room.gameId);
+        }, 3000); // 每3秒检查一次
+      } else if (room.status === 'waiting') {
+        console.log('开始轮询房间状态...');
+        // 等待中：轮询房间状态，检测是否开始游戏
+        interval = setInterval(() => {
+          fetchRoomData();
+        }, 1000); // 减少到每1秒检查房间状态，提高响应速度
+      }
+
+      if (interval) {
+        setPollingInterval(interval);
+      }
+
+      // 清理函数
+      return () => {
+        if (interval) {
+          clearInterval(interval);
+        }
+      };
+    } else {
+      // 如果没有房间或用户信息，清除轮询
+      if (pollingInterval) {
+        console.log('停止轮询');
+        clearInterval(pollingInterval);
+        setPollingInterval(null);
+      }
+    }
+  }, [room?.status, room?.gameId, currentUser]);
+
+  // 游戏状态变化时清除轮询
+  useEffect(() => {
+    if (gameData?.status === 'finished' && pollingInterval) {
+      console.log('游戏结束，停止轮询');
+      clearInterval(pollingInterval);
+      setPollingInterval(null);
+    }
+  }, [gameData?.status, pollingInterval]);
+
+  // 组件卸载时清除轮询
+  useEffect(() => {
+    return () => {
+      if (pollingInterval) {
+        clearInterval(pollingInterval);
+      }
+    };
+  }, [pollingInterval]);
+
+  // 当房间数据加载完成且包含收藏剧本时，自动填充配置
+  useEffect(() => {
+    if (room?.collectedScript && currentUser?.id === room.hostId) {
+      const script = room.collectedScript;
+      setRounds(script.rounds.toString());
+      setPlotRequirement(script.plotRequirement);
+      // 不再自动设置AI类型，让房主自己选择
+    }
+  }, [room, currentUser]);
 
   // 自动滚动到聊天底部
   useEffect(() => {
@@ -70,12 +146,27 @@ export default function RoomPage() {
       const data = await response.json();
       
       if (data.success) {
-        setRoom(data.room);
+        const newRoom = data.room;
+        
+        // 检测房间状态变化
+        if (room && room.status !== newRoom.status) {
+          console.log(`房间状态变化: ${room.status} -> ${newRoom.status}`);
+          
+          // 如果从等待状态变为游戏状态，自动获取游戏数据
+          if (room.status === 'waiting' && newRoom.status === 'playing' && newRoom.gameId) {
+            console.log('检测到游戏开始，自动进入游戏界面');
+            // 立即获取游戏数据，不延迟
+            fetchGameData(newRoom.gameId);
+          }
+        }
+        
+        setRoom(newRoom);
         setPlayers(data.players);
         
-        // 如果游戏已开始，获取游戏数据
-        if (data.room.status === 'playing' && data.room.gameId) {
-          fetchGameData(data.room.gameId);
+        // 如果游戏已开始且是首次加载，获取游戏数据
+        if (newRoom.status === 'playing' && newRoom.gameId && !room) {
+          console.log('首次加载检测到游戏已开始，获取游戏数据');
+          fetchGameData(newRoom.gameId);
         }
       } else {
         router.push('/');
@@ -93,19 +184,79 @@ export default function RoomPage() {
       const response = await fetch(`/api/games/${gameId}`);
       const data = await response.json();
       if (data.success) {
-        setGameData(data.gameRecord);
-        // 获取当前轮次的聊天消息
-        const currentRound = data.gameRecord.roundRecords.length - 1;
-        if (currentRound >= 0) {
-          setChatMessages(data.gameRecord.roundRecords[currentRound]?.messages || []);
+        const newGameData = data.gameRecord;
+        
+        // 检查游戏是否结束
+        if (newGameData.status === 'finished' && (!gameData || gameData.status !== 'finished')) {
+          console.log('检测到游戏结束，显示游戏复盘');
+          // 停止轮询
+          if (pollingInterval) {
+            clearInterval(pollingInterval);
+            setPollingInterval(null);
+          }
+          // 为所有真人玩家生成复盘，不显示收藏选项
+          setTimeout(() => {
+            generateSummariesForAllPlayers();
+            setShowGameSummary(true);
+            // 游戏结束后检查收藏状态
+            checkScriptCollectionStatus(newGameData.id);
+          }, 1000); // 稍微延迟一下，确保界面更新完成
         }
+        
+        // 检查轮次是否发生变化
+        if (gameData && newGameData.roundRecords.length !== gameData.roundRecords.length) {
+          console.log('游戏轮次发生变化，刷新界面');
+          // 轮次变化时的特殊处理
+          const currentRound = newGameData.roundRecords.length - 1;
+          if (currentRound >= 0) {
+            setChatMessages(newGameData.roundRecords[currentRound]?.messages || []);
+          }
+        } else if (gameData) {
+          // 更新当前轮次的聊天消息
+          const currentRound = newGameData.roundRecords.length - 1;
+          if (currentRound >= 0) {
+            setChatMessages(newGameData.roundRecords[currentRound]?.messages || []);
+          }
+        } else {
+          // 首次加载
+          const currentRound = newGameData.roundRecords.length - 1;
+          if (currentRound >= 0) {
+            setChatMessages(newGameData.roundRecords[currentRound]?.messages || []);
+          }
+        }
+        
+        setGameData(newGameData);
+        
+        // 检查是否已收藏该剧本
+        checkScriptCollectionStatus(newGameData.id);
+        
         // 获取准备状态
-        if (data.gameRecord.readyPlayers) {
-          setReadyPlayers(new Set(data.gameRecord.readyPlayers));
+        if (newGameData.readyPlayers) {
+          setReadyPlayers(new Set(newGameData.readyPlayers));
         }
       }
     } catch (error) {
       console.error('Failed to fetch game data:', error);
+    }
+  };
+
+  // 检查剧本收藏状态
+  const checkScriptCollectionStatus = async (gameId) => {
+    if (!currentUser) return;
+    
+    try {
+      const response = await fetch(`/api/users/${currentUser.id}/profile`);
+      if (response.ok) {
+        const data = await response.json();
+        if (data.success && data.user.collectedScripts) {
+          const isCollected = data.user.collectedScripts.some(
+            script => script.originalGameId === gameId
+          );
+          setIsScriptCollected(isCollected);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to check collection status:', error);
     }
   };
 
@@ -135,6 +286,17 @@ export default function RoomPage() {
       return;
     }
 
+    // 如果是收藏剧本，检查AI数量是否正确
+    if (room.collectedScript) {
+      const requiredAICount = room.collectedScript.characters?.filter(c => !c.isMainCharacter).length || 0;
+      const selectedAICount = Array.from(selectedAITypes.values()).reduce((sum, count) => sum + count, 0);
+      
+      if (selectedAICount !== requiredAICount) {
+        alert(`请选择 ${requiredAICount} 个AI角色，当前已选择 ${selectedAICount} 个`);
+        return;
+      }
+    }
+
     // 构建AI NPC数组，根据数量重复类型
     const aiNPCTypes = [];
     for (const [type, count] of selectedAITypes) {
@@ -143,7 +305,10 @@ export default function RoomPage() {
       }
     }
 
+    setStartingGame(true); // 开始加载状态
+
     try {
+      console.log('开始发送游戏创建请求...');
       const response = await fetch(`/api/rooms/${params.id}/start`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -154,16 +319,46 @@ export default function RoomPage() {
         })
       });
 
+      console.log('游戏创建请求返回:', response.status);
       const data = await response.json();
+      
       if (data.success) {
-        // 直接刷新数据，不显示弹窗
+        console.log('游戏创建成功，刷新房间数据');
+        // 立即刷新数据，然后再进行几次额外刷新确保同步
         fetchRoomData();
+        
+        // 额外的刷新确保其他玩家能够快速同步状态
+        setTimeout(() => fetchRoomData(), 500);
+        setTimeout(() => fetchRoomData(), 1500);
       } else {
-        alert('开始游戏失败：' + data.error);
+        console.error('游戏创建失败:', data.error);
+        let errorMessage = '开始游戏失败';
+        
+        if (data.error.includes('503') || data.error.includes('Service Unavailable')) {
+          errorMessage = 'AI服务暂时不可用，请稍后重试';
+        } else if (data.error.includes('timeout')) {
+          errorMessage = '请求超时，请检查网络连接后重试';
+        } else if (data.error) {
+          errorMessage = `开始游戏失败：${data.error}`;
+        }
+        
+        alert(errorMessage);
       }
     } catch (error) {
       console.error('Failed to start game:', error);
-      alert('开始游戏失败');
+      let errorMessage = '开始游戏失败';
+      
+      if (error.message.includes('Failed to fetch')) {
+        errorMessage = '网络连接失败，请检查网络后重试';
+      } else if (error.message.includes('timeout')) {
+        errorMessage = '请求超时，请重试';
+      } else {
+        errorMessage = '开始游戏失败，请重试';
+      }
+      
+      alert(errorMessage);
+    } finally {
+      setStartingGame(false); // 结束加载状态
     }
   };
 
@@ -525,42 +720,87 @@ export default function RoomPage() {
             
             {(() => {
               const myCharacterId = gameData?.playerCharacters?.[currentUser?.id];
-              const currentRoundNum = gameData?.roundRecords?.length || 0;
-              const userClue = currentRoundNum > 0 ? 
-                gameData?.roundRecords[currentRoundNum - 1]?.privateClues?.[myCharacterId] : null;
-              
-              // 获取个人剧本中的隐藏信息
               const personalScript = myCharacterId ? gameData?.personalScripts?.[myCharacterId] : null;
-              const personalRoundContent = personalScript?.personalRoundContents?.find(prc => prc.round === currentRoundNum);
-              const hiddenInfo = personalRoundContent?.hiddenInfo;
+              const currentRound = gameData?.roundRecords?.length || 0;
+              
+              // 获取所有已进行轮次的线索
+              const allClues = [];
+              
+              for (let round = 1; round <= currentRound; round++) {
+                const roundRecord = gameData?.roundRecords?.find(rr => rr.round === round);
+                const userClue = roundRecord?.privateClues?.[myCharacterId];
+                const personalRoundContent = personalScript?.personalRoundContents?.find(prc => prc.round === round);
+                const hiddenInfo = personalRoundContent?.hiddenInfo;
+                
+                if (userClue || hiddenInfo) {
+                  allClues.push({
+                    round,
+                    userClue,
+                    hiddenInfo,
+                    isCurrentRound: round === currentRound
+                  });
+                }
+              }
+
+              if (allClues.length === 0) {
+                return (
+                  <div className="text-slate-400 text-center py-4 text-sm">
+                    {currentRound > 0 ? '暂无私人信息' : '游戏开始后将显示信息'}
+                  </div>
+                );
+              }
 
               return (
-                <div className="space-y-4">
-                  {/* 私人线索 */}
-                  {userClue && (
-                    <div className="bg-yellow-900/20 rounded-lg p-4 border border-yellow-500/30">
-                      <div className="text-yellow-300 text-sm font-semibold mb-2">📋 线索</div>
-                      <div className="text-yellow-100 text-sm leading-relaxed">
-                        {userClue}
+                <div className="max-h-full overflow-y-auto space-y-4">
+                  {allClues.map((clueData) => (
+                    <div 
+                      key={clueData.round}
+                      className={`rounded-xl border transition-all ${
+                        clueData.isCurrentRound 
+                          ? 'bg-slate-800/70 border-purple-500/50 ring-1 ring-purple-500/30' 
+                          : 'bg-slate-800/30 border-slate-600/50'
+                      }`}
+                    >
+                      {/* 轮次标题 */}
+                      <div className={`px-4 py-2 border-b ${
+                        clueData.isCurrentRound 
+                          ? 'border-purple-500/30 text-purple-300' 
+                          : 'border-slate-600/30 text-slate-400'
+                      } text-sm font-semibold flex items-center justify-between`}>
+                        <span>第 {clueData.round} 轮线索</span>
+                        {clueData.isCurrentRound && (
+                          <span className="text-xs bg-purple-600 px-2 py-1 rounded">当前</span>
+                        )}
+                      </div>
+                      
+                      {/* 线索内容 */}
+                      <div className="p-4 space-y-3">
+                        {/* 剧情线索 */}
+                        {clueData.userClue && (
+                          <div className="bg-yellow-900/20 rounded-lg p-3 border border-yellow-500/30">
+                            <div className="text-yellow-300 text-xs font-semibold mb-2">📋 剧情线索</div>
+                            <div className={`text-sm leading-relaxed ${
+                              clueData.isCurrentRound ? 'text-yellow-100' : 'text-yellow-200/70'
+                            }`}>
+                              {clueData.userClue}
+                            </div>
+                          </div>
+                        )}
+                        
+                        {/* 隐藏信息 */}
+                        {clueData.hiddenInfo && (
+                          <div className="bg-red-900/20 rounded-lg p-3 border border-red-500/30">
+                            <div className="text-red-300 text-xs font-semibold mb-2">🤫 秘密信息</div>
+                            <div className={`text-sm leading-relaxed ${
+                              clueData.isCurrentRound ? 'text-red-100' : 'text-red-200/70'
+                            }`}>
+                              {clueData.hiddenInfo}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
-                  )}
-                  
-                  {/* 隐藏信息 */}
-                  {hiddenInfo && (
-                    <div className="bg-red-900/20 rounded-lg p-4 border border-red-500/30">
-                      <div className="text-red-300 text-sm font-semibold mb-2">🤫 秘密信息</div>
-                      <div className="text-red-100 text-sm leading-relaxed">
-                        {hiddenInfo}
-                      </div>
-                    </div>
-                  )}
-                  
-                  {!userClue && !hiddenInfo && (
-                    <div className="text-slate-400 text-center py-4 text-sm">
-                      {currentRoundNum > 0 ? '本轮暂无私人信息' : '游戏开始后将显示信息'}
-                    </div>
-                  )}
+                  ))}
                 </div>
               );
             })()}
@@ -572,6 +812,8 @@ export default function RoomPage() {
 
   // 渲染游戏复盘界面
   const renderGameSummary = () => {
+    console.log('渲染复盘界面，gameSummary:', gameSummary);
+    
     if (!gameSummary) {
       return (
         <div className="flex-1 flex items-center justify-center">
@@ -603,7 +845,7 @@ export default function RoomPage() {
                 📚 本局故事复盘
               </h2>
               <div className="text-gray-300 leading-relaxed text-sm">
-                {gameSummary.storyReview}
+                {gameSummary.storyReview || '故事复盘内容生成中...'}
               </div>
             </div>
 
@@ -613,7 +855,7 @@ export default function RoomPage() {
                 💡 精彩点解密
               </h2>
               <div className="text-gray-300 leading-relaxed text-sm">
-                {gameSummary.plotAnalysis}
+                {gameSummary.plotAnalysis || '精彩点分析生成中...'}
               </div>
             </div>
 
@@ -623,7 +865,7 @@ export default function RoomPage() {
                 ✨ 故事升华
               </h2>
               <div className="text-gray-300 leading-relaxed text-sm">
-                {gameSummary.storyElevation}
+                {gameSummary.storyElevation || '故事升华内容生成中...'}
               </div>
             </div>
           </div>
@@ -666,8 +908,19 @@ export default function RoomPage() {
             </div>
           )}
 
-          {/* 返回按钮 */}
+          {/* 操作按钮 */}
           <div className="text-center pt-6">
+            <button
+              onClick={collectScript}
+              disabled={isScriptCollected}
+              className={`px-8 py-3 text-white font-bold rounded-lg transition-all duration-300 mr-4 ${
+                isScriptCollected 
+                  ? 'bg-gray-600 cursor-not-allowed' 
+                  : 'bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700'
+              }`}
+            >
+              {isScriptCollected ? '✅ 已收藏' : '📚 收藏剧本'}
+            </button>
             <button
               onClick={() => setShowGameSummary(false)}
               className="px-8 py-3 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-bold rounded-lg transition-all duration-300 mr-4"
@@ -848,18 +1101,11 @@ export default function RoomPage() {
       if (response.ok) {
         const result = await response.json();
         if (result.success) {
-          // 显示复盘界面
+          // 为所有真人玩家生成复盘
+          await generateSummariesForAllPlayers();
           setShowGameSummary(true);
           
-          // 生成游戏复盘
-          await generateGameSummary();
-          
-          // 如果游戏成功结束，可以考虑后续处理
-          if (result.gameEnded) {
-            console.log('游戏已完全结束');
-          } else {
-            console.log(`等待其他玩家确认... (${result.confirmedPlayers}/${result.totalPlayers})`);
-          }
+          console.log(`游戏已结束，由 ${result.endedBy} 结束`);
         } else {
           alert('结束故事失败：' + result.error);
         }
@@ -872,7 +1118,151 @@ export default function RoomPage() {
     }
   };
 
-  // 生成游戏复盘
+  // 收藏剧本功能
+  const collectScript = async () => {
+    if (!gameData || !currentUser) return;
+    
+    try {
+      const response = await fetch(`/api/users/${currentUser.id}/collect-script`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          scriptId: gameData.scriptId,
+          gameId: gameData.id
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          // 收藏成功，触发用户数据更新事件并更新状态
+          console.log('剧本收藏成功');
+          setIsScriptCollected(true); // 设置已收藏状态
+          if (typeof window !== 'undefined') {
+            window.dispatchEvent(new CustomEvent('userDataUpdated'));
+          }
+        } else {
+          alert('收藏失败：' + result.error);
+        }
+      } else {
+        alert('收藏失败');
+      }
+    } catch (error) {
+      console.error('Failed to collect script:', error);
+      alert('收藏失败');
+    }
+  };
+
+  // 为所有真人玩家生成复盘
+  const generateSummariesForAllPlayers = async () => {
+    if (!gameData || !currentUser) return;
+
+    // 获取所有真人玩家ID
+    const humanPlayers = gameData.players || [];
+    
+    try {
+      // 设置加载状态
+      setGameSummary({
+        storyReview: '正在为所有玩家生成复盘...',
+        plotAnalysis: '正在分析精彩点...',
+        storyElevation: '正在升华故事...',
+        playerAnalysis: {}
+      });
+
+      // 为当前用户生成复盘
+      const response = await fetch(`/api/games/${gameData.id}/generate-summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          playerId: currentUser.id
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success && result.summary) {
+          setGameSummary(result.summary);
+          return;
+        }
+      }
+
+      // 如果获取失败，显示错误信息
+      setGameSummary({
+        storyReview: '复盘生成失败，请稍后重试',
+        plotAnalysis: '分析生成失败，请稍后重试',
+        storyElevation: '升华生成失败，请稍后重试',
+        playerAnalysis: {}
+      });
+
+    } catch (error) {
+      console.error('Failed to generate summaries for all players:', error);
+      setGameSummary({
+        storyReview: '复盘生成失败，请稍后重试',
+        plotAnalysis: '分析生成失败，请稍后重试',
+        storyElevation: '升华生成失败，请稍后重试',
+        playerAnalysis: {}
+      });
+    }
+  };
+  const getOrGenerateGameSummary = async () => {
+    if (!gameData || !currentUser) return;
+
+    try {
+      // 先尝试获取已有的复盘
+      const response = await fetch(`/api/games/${gameData.id}/generate-summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          playerId: currentUser.id
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('复盘API返回结果:', result);
+        if (result.success && result.summary) {
+          console.log('设置复盘数据:', result.summary);
+          setGameSummary(result.summary);
+          return;
+        } else {
+          console.error('API成功但数据无效:', result);
+        }
+      } else {
+        console.error('API请求失败:', response.status);
+      }
+
+      // 如果获取失败，显示错误信息
+      console.error('获取复盘失败');
+      setGameSummary({
+        storyReview: '复盘生成中，请稍候...',
+        plotAnalysis: '复盘生成中，请稍候...',
+        storyElevation: '复盘生成中，请稍候...',
+        playerAnalysis: {}
+      });
+
+      // 等待一段时间后重试
+      setTimeout(() => {
+        getOrGenerateGameSummary();
+      }, 3000);
+
+    } catch (error) {
+      console.error('Failed to get summary:', error);
+      // 设置重试状态
+      setGameSummary({
+        storyReview: '正在重试获取复盘...',
+        plotAnalysis: '正在重试获取复盘...',
+        storyElevation: '正在重试获取复盘...',
+        playerAnalysis: {}
+      });
+
+      // 3秒后重试
+      setTimeout(() => {
+        getOrGenerateGameSummary();
+      }, 3000);
+    }
+  };
+
+  // 生成游戏复盘（保留原函数供手动调用）
   const generateGameSummary = async () => {
     if (!gameData || !currentUser) return;
 
@@ -992,7 +1382,11 @@ export default function RoomPage() {
                 {isHost && room.status === 'waiting' && (
                   <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-purple-500/30 p-6">
                     <h3 className="text-lg font-bold text-white mb-4">
-                      AI NPC选择 (已选择: {Array.from(selectedAITypes.values()).reduce((sum, count) => sum + count, 0)}个)
+                      AI NPC选择 (已选择: {Array.from(selectedAITypes.values()).reduce((sum, count) => sum + count, 0)}个
+                      {room.collectedScript ? (() => {
+                        const aiCharacterCount = room.collectedScript.characters?.filter(c => !c.isMainCharacter).length || 0;
+                        return aiCharacterCount > 0 ? ` / 需要: ${aiCharacterCount}个` : '';
+                      })() : ' / 自由选择'})
                     </h3>
                     <div className="space-y-3">
                       {AI_CHARACTER_TYPES.map((type) => {
@@ -1038,12 +1432,29 @@ export default function RoomPage() {
               <div className="lg:col-span-2">
                 {isHost && room.status === 'waiting' && (
                   <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-purple-500/30 p-6">
-                    <h2 className="text-xl font-bold text-white mb-6">游戏配置</h2>
+                    <h2 className="text-xl font-bold text-white mb-6">
+                      {room.collectedScript ? '收藏剧本配置' : '游戏配置'}
+                    </h2>
+                    
+                    {/* 如果是收藏剧本，显示剧本信息 */}
+                    {room.collectedScript && (
+                      <div className="mb-6 p-4 bg-purple-600/20 border border-purple-500/30 rounded-lg">
+                        <h3 className="text-white font-medium mb-2">📚 {room.collectedScript.title}</h3>
+                        <p className="text-purple-200 text-sm mb-2">
+                          {room.collectedScript.rounds}轮游戏 · 
+                          需要{room.collectedScript.characters?.filter(c => c.isMainCharacter).length || 0}名真人玩家 · 
+                          {room.collectedScript.characters?.filter(c => !c.isMainCharacter).length || 0}个AI角色
+                        </p>
+                        <p className="text-purple-300 text-xs line-clamp-3">
+                          {room.collectedScript.background}
+                        </p>
+                      </div>
+                    )}
                     
                     {/* 游戏轮数 */}
                     <div className="mb-6">
                       <label className="block text-white font-medium mb-2">
-                        游戏轮数
+                        游戏轮数 {room.collectedScript && '(已预设)'}
                       </label>
                       <input
                         type="number"
@@ -1055,13 +1466,14 @@ export default function RoomPage() {
                         className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-text"
                         placeholder="输入游戏轮数（1-20）"
                         autoComplete="off"
+                        disabled={!!room.collectedScript}
                       />
                     </div>
 
                     {/* 剧情要求 */}
                     <div className="mb-6">
                       <label className="block text-white font-medium mb-2">
-                        剧情要求
+                        剧情要求 {room.collectedScript && '(已预设)'}
                       </label>
                       <textarea
                         value={plotRequirement}
@@ -1079,16 +1491,27 @@ export default function RoomPage() {
                         placeholder="描述你想要的剧情类型、背景设定、风格等..."
                         autoComplete="off"
                         spellCheck="false"
+                        disabled={!!room.collectedScript}
                       />
                     </div>
 
                     {/* 开始游戏按钮 */}
                     <button
                       onClick={startGame}
-                      disabled={!plotRequirement.trim() || parseInt(rounds) < 1}
-                      className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-600 text-white font-bold rounded-lg transition-all disabled:cursor-not-allowed"
+                      disabled={!plotRequirement.trim() || parseInt(rounds) < 1 || startingGame}
+                      className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-600 text-white font-bold rounded-lg transition-all disabled:cursor-not-allowed flex items-center justify-center"
                     >
-                      开始游戏
+                      {startingGame ? (
+                        <>
+                          <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                            <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                          </svg>
+                          {room.collectedScript ? '正在重新开始剧本...' : '正在生成剧本...'}
+                        </>
+                      ) : (
+                        room.collectedScript ? '开始此剧本' : '开始游戏'
+                      )}
                     </button>
                   </div>
                 )}

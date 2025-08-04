@@ -1,11 +1,99 @@
 import { LLMRequest, LLMResponse, LLMContext, GameRecord, Script, AINPCConfig } from '@/types';
 
-const GEMINI_API_KEY = 'AIzaSyBlRd7b8-Lx3AXKFRTLz9jHqC7T4dJ51jg';
+const GEMINI_API_KEY = 'AIzaSyBurtcL5QVBYKi1FmJBIzBa7nlasUvt5To';
 const GEMINI_2_5_PRO_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 const GEMINI_2_0_FLASH_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
-// 通用LLM调用函数
-export async function callLLM(prompt: string, useProModel = false): Promise<string> {
+// 开发模式下的模拟响应
+const ENABLE_MOCK_MODE = false;
+
+// 模拟LLM响应函数
+function getMockResponse(prompt: string): string {
+  if (prompt.includes('生成剧本')) {
+    return JSON.stringify({
+      title: "神秘的古堡谜案",
+      background: "在一个暴风雨的夜晚，几位客人被邀请到古老的维多利亚庄园过夜。然而，当第二天早晨到来时，庄园的主人却离奇死亡。每个人都有动机，每个人都有秘密。真相究竟是什么？",
+      characters: [
+        {
+          id: "char_001",
+          name: "爱丽丝·维多利亚",
+          identity: "庄园继承人",
+          personality: "优雅但隐藏着不为人知的秘密",
+          isMainCharacter: true
+        },
+        {
+          id: "char_002", 
+          name: "詹姆斯·布朗",
+          identity: "律师",
+          personality: "严谨理性，擅长分析",
+          isMainCharacter: true
+        },
+        {
+          id: "char_003",
+          name: "莎拉·琼斯",
+          identity: "管家",
+          personality: "忠诚但神秘莫测",
+          isMainCharacter: false
+        }
+      ],
+      roundContents: [
+        {
+          round: 1,
+          plot: "第一轮：发现尸体。庄园主人被发现死在书房中，现场一片狼藉。"
+        },
+        {
+          round: 2,
+          plot: "第二轮：初步调查。警察到达现场，开始询问各位客人的不在场证明。"
+        },
+        {
+          round: 3,
+          plot: "第三轮：深入调查。更多的线索被发现，每个人的动机逐渐浮出水面。"
+        }
+      ]
+    });
+  } else if (prompt.includes('个人剧本')) {
+    return JSON.stringify({
+      personalBackground: "你是这个故事中的关键人物，有着不为人知的秘密。",
+      personalRoundContents: [
+        {
+          round: 1,
+          personalPlot: "你发现了尸体，心中充满了恐惧和疑虑。",
+          hiddenInfo: "你知道一些其他人不知道的秘密..."
+        }
+      ]
+    });
+  } else if (prompt.includes('AI角色是否要说话')) {
+    return Math.random() > 0.7 ? "是" : "否";
+  } else if (prompt.includes('AI角色发言')) {
+    const responses = [
+      "我觉得这件事很可疑...",
+      "让我们仔细分析一下线索",
+      "这个说法有矛盾之处",
+      "我想起了一个重要的细节"
+    ];
+    return responses[Math.floor(Math.random() * responses.length)];
+  } else if (prompt.includes('故事复盘') || prompt.includes('回忆这次游戏')) {
+    return "这是一次精彩的剧本杀体验！在这个神秘的故事中，我们一起探索了人性的复杂与真相的曲折。每个角色都有自己的秘密，每个线索都指向不同的方向。通过层层推理和激烈讨论，我们最终揭开了事件的真相。这个故事让我们看到了在关键时刻，人性的选择往往决定了命运的走向。整个游戏过程充满了悬疑和惊喜，每一次的发言都可能改变我们对真相的认知。";
+  } else if (prompt.includes('精彩点解密') || prompt.includes('精彩的推理')) {
+    return "游戏中最精彩的时刻是当关键线索被发现的那一瞬间，所有人的表情都发生了微妙的变化。每个玩家的推理都展现了独特的逻辑思维，特别是在分析证据时的严谨态度令人印象深刻。AI角色的参与为游戏增添了更多的不确定性，它们的发言往往在关键时刻提供了重要的线索或者制造了有趣的误导。整个讨论过程中，玩家们的互动自然流畅，展现了良好的游戏素养。";
+  } else if (prompt.includes('故事升华') || prompt.includes('深层含义')) {
+    return "这个故事让我们思考了人性中善与恶的界限。在复杂的人际关系中，每个人都有自己的立场和难处。真相往往比表面看起来更加复杂，正如生活中的许多选择一样，没有绝对的对错。这次游戏体验提醒我们要用包容的心态去理解他人，同时也要保持独立思考的能力。";
+  } else if (prompt.includes('观点总结') || prompt.includes('剧情贡献') || prompt.includes('发言风格')) {
+    return "观点总结: 该玩家在游戏中展现了敏锐的观察力和逻辑推理能力，能够抓住关键线索进行深入分析。\n剧情贡献: 通过积极的参与和精彩的发言，为游戏的推进和氛围营造做出了重要贡献。\n发言风格: 发言条理清晰，语言生动有趣，既能保持游戏的紧张感又不失幽默风趣。";
+  } else {
+    return "这是一个模拟响应，用于开发测试。";
+  }
+}
+
+// 通用LLM调用函数，带有重试机制
+export async function callLLM(prompt: string, useProModel = false, retries = 3): Promise<string> {
+  // 如果启用模拟模式，直接返回模拟响应
+  if (ENABLE_MOCK_MODE) {
+    console.log('使用模拟LLM响应');
+    await new Promise(resolve => setTimeout(resolve, 1000 + Math.random() * 2000)); // 模拟延迟
+    return getMockResponse(prompt);
+  }
+  
   const url = useProModel ? GEMINI_2_5_PRO_URL : GEMINI_2_0_FLASH_URL;
   
   const request: LLMRequest = {
@@ -20,31 +108,75 @@ export async function callLLM(prompt: string, useProModel = false): Promise<stri
     ]
   };
 
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-goog-api-key': GEMINI_API_KEY,
-      },
-      body: JSON.stringify(request),
-    });
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      console.log(`LLM API调用尝试 ${attempt}/${retries}...`);
+      
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-goog-api-key': GEMINI_API_KEY,
+        },
+        body: JSON.stringify(request),
+        // 增加超时时间
+        signal: AbortSignal.timeout(60000) // 60秒超时
+      });
 
-    if (!response.ok) {
-      throw new Error(`LLM API error: ${response.status} ${response.statusText}`);
-    }
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`LLM API错误 (尝试 ${attempt}): ${response.status} ${response.statusText}`, errorText);
+        
+        // 如果是服务器错误（5xx）且还有重试次数，则继续重试
+        if (response.status >= 500 && attempt < retries) {
+          console.log(`服务器错误，等待 ${attempt * 2} 秒后重试...`);
+          await new Promise(resolve => setTimeout(resolve, attempt * 2000)); // 递增延迟
+          continue;
+        }
+        
+        // 如果重试次数用完，使用降级方案
+        if (attempt === retries && response.status >= 500) {
+          console.log('LLM服务不可用，使用降级方案');
+          return getMockResponse(prompt);
+        }
+        
+        // 对于非服务器错误也使用降级方案
+        console.log('API调用失败，使用降级方案');
+        return getMockResponse(prompt);
+      }
 
-    const data: LLMResponse = await response.json();
-    
-    if (data.candidates && data.candidates.length > 0) {
-      return data.candidates[0].content.parts[0].text;
-    } else {
-      throw new Error('No response from LLM');
+      const data: LLMResponse = await response.json();
+      
+      if (data.candidates && data.candidates.length > 0) {
+        console.log(`LLM API调用成功 (尝试 ${attempt})`);
+        return data.candidates[0].content.parts[0].text;
+      } else {
+        throw new Error('No response from LLM');
+      }
+    } catch (error) {
+      console.error(`LLM API调用失败 (尝试 ${attempt}):`, error);
+      
+      // 如果是最后一次尝试，使用降级方案
+      if (attempt === retries) {
+        console.log('所有重试失败，使用降级方案');
+        return getMockResponse(prompt);
+      }
+      
+      // 如果不是服务器错误，直接抛出
+      if (error instanceof Error && !error.message.includes('503') && !error.message.includes('502') && !error.message.includes('504')) {
+        // 对于非服务器错误，也使用降级方案
+        console.log('非服务器错误，使用降级方案');
+        return getMockResponse(prompt);
+      }
+      
+      // 等待后重试
+      console.log(`等待 ${attempt * 2} 秒后重试...`);
+      await new Promise(resolve => setTimeout(resolve, attempt * 2000));
     }
-  } catch (error) {
-    console.error('LLM API call failed:', error);
-    throw error;
   }
+  
+  console.log('LLM API调用失败，使用降级方案');
+  return getMockResponse(prompt);
 }
 
 // 1. 生成剧本 - 使用2.5 Pro

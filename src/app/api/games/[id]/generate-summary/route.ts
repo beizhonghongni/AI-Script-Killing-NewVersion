@@ -23,6 +23,23 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Can only generate summary in the final round' });
     }
 
+    // 检查是否已经有缓存的复盘结果
+    if (gameRecord.finalSummary && Object.keys(gameRecord.finalSummary).length > 0) {
+      // 检查缓存的复盘内容是否为空
+      const cachedSummary = Object.values(gameRecord.finalSummary)[0];
+      if (cachedSummary && cachedSummary.storyReview && cachedSummary.storyReview.trim() && 
+          cachedSummary.plotAnalysis && cachedSummary.plotAnalysis.trim() && 
+          cachedSummary.storyElevation && cachedSummary.storyElevation.trim()) {
+        // 返回已缓存的复盘结果（内容非空）
+        console.log('返回缓存的复盘结果');
+        return NextResponse.json({ success: true, summary: cachedSummary });
+      } else {
+        // 如果缓存内容为空，清除缓存并重新生成
+        console.log('缓存内容为空，清除缓存重新生成');
+        delete gameRecord.finalSummary;
+      }
+    }
+
     // 获取用户信息以确定角色
     const user = getUserById(playerId);
     const characterId = gameRecord.playerCharacters[playerId];
@@ -83,6 +100,7 @@ ${gameMessages}
 `;
 
     const storyReview = await callLLM(storyReviewPrompt, true); // 使用Pro模型生成更好的总结
+    console.log('Story review LLM result:', storyReview);
 
     // 生成精彩点解密
     const plotAnalysisPrompt = `
@@ -103,6 +121,7 @@ ${gameMessages}
 `;
 
     const plotAnalysis = await callLLM(plotAnalysisPrompt, true);
+    console.log('Plot analysis LLM result:', plotAnalysis);
 
     // 生成故事升华
     const elevationPrompt = `
@@ -126,6 +145,7 @@ ${gameMessages}
 `;
 
     const storyElevation = await callLLM(elevationPrompt, true);
+    console.log('Story elevation LLM result:', storyElevation);
 
     // 生成玩家分析
     const playerAnalysis: { [playerId: string]: PlayerAnalysis } = {};
@@ -190,6 +210,8 @@ ${playerMessages}
       storyElevation: storyElevation.trim(),
       playerAnalysis
     };
+
+    console.log('Final summary object:', JSON.stringify(summary, null, 2));
 
     // 保存到游戏记录
     if (!gameRecord.finalSummary) {
