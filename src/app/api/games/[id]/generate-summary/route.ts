@@ -17,9 +17,10 @@ export async function POST(
       return NextResponse.json({ success: false, error: 'Game not found' });
     }
 
-    // 检查游戏是否已完成
-    if (gameRecord.status !== 'finished') {
-      return NextResponse.json({ success: false, error: 'Game not finished yet' });
+    // 检查是否在最后一轮（允许玩家在最后一轮生成复盘）
+    const currentRound = gameRecord.roundRecords.length;
+    if (currentRound !== gameRecord.rounds) {
+      return NextResponse.json({ success: false, error: 'Can only generate summary in the final round' });
     }
 
     // 获取用户信息以确定角色

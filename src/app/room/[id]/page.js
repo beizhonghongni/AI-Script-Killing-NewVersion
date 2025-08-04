@@ -7,7 +7,7 @@ import { useParams, useRouter } from 'next/navigation';
 const AI_CHARACTER_TYPES = [
   { id: 'logical', name: '逻辑分析型', description: '善于逻辑推理和细节分析' },
   { id: 'exploratory', name: '探索冒险型', description: '勇于尝试新想法和假设' },
-  { id: 'mysterious', name: '神秘莫测型', description: '话语间常带有神秘色彩' }, 
+  { id: 'mysterious', name: '神秘莫测型', description: '话语间常带有神秘色彩' },
   { id: 'suspicious', name: '多疑谨慎型', description: '对一切都保持怀疑态度' },
   { id: 'emotional', name: '情感丰富型', description: '情绪表达丰富生动' },
   { id: 'calm', name: '冷静沉稳型', description: '始终保持冷静和理性' }
@@ -27,7 +27,10 @@ export default function RoomPage() {
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
   const [readyPlayers, setReadyPlayers] = useState(new Set()); // 已准备的玩家
+  const [showGameSummary, setShowGameSummary] = useState(false); // 显示游戏复盘
+  const [gameSummary, setGameSummary] = useState(null); // 游戏复盘数据
   const chatContainerRef = useRef(null); // 聊天容器引用
+  const plotContainerRef = useRef(null); // 剧情容器引用
 
   useEffect(() => {
     // 使用sessionStorage而不是localStorage，避免多标签页冲突
@@ -48,6 +51,18 @@ export default function RoomPage() {
       chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
     }
   }, [chatMessages]);
+
+  // 自动滚动到最新剧情
+  useEffect(() => {
+    if (plotContainerRef.current && gameData?.script?.roundContents) {
+      // 延迟一点执行，确保DOM已更新
+      setTimeout(() => {
+        if (plotContainerRef.current) {
+          plotContainerRef.current.scrollTop = plotContainerRef.current.scrollHeight;
+        }
+      }, 100);
+    }
+  }, [gameData?.roundRecords?.length, gameData?.script?.roundContents]);
 
   const fetchRoomData = async () => {
     try {
@@ -296,7 +311,7 @@ export default function RoomPage() {
           {/* 当前剧情 */}
           <div className="p-6 border-b border-purple-500/20">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-white">📖 剧情回顾</h3>
+              <h3 className="text-xl font-bold text-white">📖 剧情</h3>
               {/* 房主控制按钮 */}
               {isHost && currentRoundContent && (
                 <div className="flex items-center space-x-2">
@@ -327,7 +342,11 @@ export default function RoomPage() {
             </div>
             
             {/* 剧情滚动区域 */}
-            <div className="max-h-64 overflow-y-auto space-y-4">
+            <div 
+              ref={plotContainerRef}
+              className="max-h-64 overflow-y-auto space-y-4"
+              style={{ scrollBehavior: 'smooth' }}
+            >
               {gameData?.script?.roundContents?.map((roundContent, index) => {
                 const roundNumber = roundContent.round;
                 const isCurrentRound = roundNumber === currentRound;
@@ -364,44 +383,33 @@ export default function RoomPage() {
                 );
               })}
               
-              {/* 只在真正的故事阅读阶段显示准备按钮 - 即没有轮次记录且状态为story_reading */}
-              {gameData?.status === 'story_reading' && (!gameData?.roundRecords || gameData.roundRecords.length === 0) && (
+              {/* 准备按钮区域 - 只在故事阅读状态且没有剧情轮次时显示 */}
+              {gameData?.status === 'story_reading' && currentRound === 0 && (
                 <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-purple-500/30 p-6">
-                  <div className="text-center">
-                    <p className="text-white mb-4">📖 请仔细阅读你的角色背景故事</p>
-                    <div className="text-slate-300 text-sm mb-6">
-                      阅读完成后，点击下方按钮开始剧情游戏
-                    </div>
-                    {!readyPlayers.has(currentUser?.id) ? (
-                      <button
-                        onClick={markPlayerReady}
-                        className="px-6 py-3 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold rounded-lg transition-all shadow-lg hover:shadow-xl transform hover:scale-105"
-                      >
-                        ✅ 已看完，开始剧情
-                      </button>
-                    ) : (
-                      <div>
-                        <p className="text-green-400 mb-2 text-lg">✅ 已准备就绪</p>
-                        <p className="text-sm text-slate-400">
-                          等待其他玩家准备完成... ({readyPlayers.size}/{players.length})
-                        </p>
-                        <div className="mt-3">
-                          <div className="bg-slate-700 rounded-full h-2 overflow-hidden">
-                            <div 
-                              className="bg-gradient-to-r from-green-500 to-emerald-500 h-full transition-all duration-500"
-                              style={{ width: `${(readyPlayers.size / players.length) * 100}%` }}
-                            ></div>
-                          </div>
+                  <div className="text-center text-slate-400">
+                    <div>
+                      <p className="mb-4">请仔细阅读你的背景故事</p>
+                      {!readyPlayers.has(currentUser?.id) && (
+                        <button
+                          onClick={markPlayerReady}
+                          className="px-6 py-2 bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-700 hover:to-emerald-700 text-white font-bold rounded-lg transition-all"
+                        >
+                          已看完，开始剧情
+                        </button>
+                      )}
+                      {readyPlayers.has(currentUser?.id) && (
+                        <div>
+                          <p className="text-green-400 mb-2">✅ 已准备</p>
+                          <p className="text-sm">等待其他玩家准备... ({readyPlayers.size}/{players.length})</p>
                         </div>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
-              
-              {/* 等待剧情开始的提示 - 当没有剧本内容且不是story_reading状态时 */}
+
+              {/* 空剧情提示 - 只在真正没有剧情且不在故事阅读状态时显示 */}
               {(!gameData?.script?.roundContents || gameData.script.roundContents.length === 0) && 
-               (!gameData?.roundRecords || gameData.roundRecords.length === 0) && 
                gameData?.status !== 'story_reading' && (
                 <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-purple-500/30 p-6">
                   <div className="text-center text-slate-400">
@@ -562,6 +570,122 @@ export default function RoomPage() {
     );
   };
 
+  // 渲染游戏复盘界面
+  const renderGameSummary = () => {
+    if (!gameSummary) {
+      return (
+        <div className="flex-1 flex items-center justify-center">
+          <div className="text-center text-white">
+            <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin mx-auto mb-4"></div>
+            <h3 className="text-xl font-bold mb-2">正在生成游戏复盘...</h3>
+            <p className="text-slate-300">请稍候，AI正在分析本局游戏</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex-1 p-6 overflow-y-auto">
+        <div className="max-w-6xl mx-auto space-y-8">
+          {/* 标题 */}
+          <div className="text-center mb-8">
+            <h1 className="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-purple-400 mb-2">
+              🎭 游戏复盘
+            </h1>
+            <p className="text-gray-300">本局游戏精彩回顾与深度分析</p>
+          </div>
+
+          {/* 故事相关复盘 */}
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+            {/* 故事复盘 */}
+            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-purple-500/30 p-6">
+              <h2 className="text-xl font-bold text-yellow-400 mb-4 flex items-center">
+                📚 本局故事复盘
+              </h2>
+              <div className="text-gray-300 leading-relaxed text-sm">
+                {gameSummary.storyReview}
+              </div>
+            </div>
+
+            {/* 精彩点解密 */}
+            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-green-500/30 p-6">
+              <h2 className="text-xl font-bold text-green-400 mb-4 flex items-center">
+                💡 精彩点解密
+              </h2>
+              <div className="text-gray-300 leading-relaxed text-sm">
+                {gameSummary.plotAnalysis}
+              </div>
+            </div>
+
+            {/* 故事升华 */}
+            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-purple-500/30 p-6">
+              <h2 className="text-xl font-bold text-purple-400 mb-4 flex items-center">
+                ✨ 故事升华
+              </h2>
+              <div className="text-gray-300 leading-relaxed text-sm">
+                {gameSummary.storyElevation}
+              </div>
+            </div>
+          </div>
+
+          {/* 玩家表现分析 */}
+          {Object.values(gameSummary.playerAnalysis || {}).length > 0 && (
+            <div className="bg-slate-800/50 backdrop-blur-sm rounded-xl border border-pink-500/30 p-6">
+              <h2 className="text-2xl font-bold text-pink-400 mb-6 flex items-center">
+                👥 玩家表现分析
+              </h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {Object.values(gameSummary.playerAnalysis).map((analysis, index) => (
+                  <div key={index} className="bg-slate-700/30 rounded-lg p-6 border border-cyan-500/20">
+                    <h3 className="text-lg font-bold text-cyan-300 mb-4 flex items-center">
+                      🎯 {analysis.playerName}
+                    </h3>
+                    <div className="space-y-4">
+                      <div>
+                        <h4 className="text-sm font-semibold text-yellow-300 mb-2">💭 观点总结</h4>
+                        <p className="text-gray-300 text-sm leading-relaxed">
+                          {analysis.viewpointSummary}
+                        </p>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-green-300 mb-2">🎬 剧情贡献</h4>
+                        <p className="text-gray-300 text-sm leading-relaxed">
+                          {analysis.plotRelatedComment}
+                        </p>
+                      </div>
+                      <div>
+                        <h4 className="text-sm font-semibold text-purple-300 mb-2">🗣️ 发言风格</h4>
+                        <p className="text-gray-300 text-sm leading-relaxed">
+                          {analysis.styleComment}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 返回按钮 */}
+          <div className="text-center pt-6">
+            <button
+              onClick={() => setShowGameSummary(false)}
+              className="px-8 py-3 bg-gradient-to-r from-gray-600 to-gray-700 hover:from-gray-700 hover:to-gray-800 text-white font-bold rounded-lg transition-all duration-300 mr-4"
+            >
+              🔙 返回游戏
+            </button>
+            <button
+              onClick={() => window.location.href = '/'}
+              className="px-8 py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-bold rounded-lg transition-all duration-300"
+            >
+              🏠 回到主页
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   const sendMessage = async () => {
     if (!newMessage.trim()) return;
 
@@ -696,10 +820,6 @@ export default function RoomPage() {
         if (result.success) {
           // 刷新游戏数据
           fetchGameData(gameData.id);
-          // 显示成功提示
-          if (result.isLastRound) {
-            alert(`已进入最后一轮！游戏即将结束。`);
-          }
         } else {
           alert('进入下一轮失败：' + result.error);
         }
@@ -728,14 +848,17 @@ export default function RoomPage() {
       if (response.ok) {
         const result = await response.json();
         if (result.success) {
-          // 如果游戏成功结束，跳转到复盘页面
+          // 显示复盘界面
+          setShowGameSummary(true);
+          
+          // 生成游戏复盘
+          await generateGameSummary();
+          
+          // 如果游戏成功结束，可以考虑后续处理
           if (result.gameEnded) {
-            window.location.href = `/game-summary/${gameData.id}`;
+            console.log('游戏已完全结束');
           } else {
-            // 显示等待其他玩家的提示
-            alert(`您已确认结束故事！等待其他玩家确认... (${result.confirmedPlayers}/${result.totalPlayers})`);
-            // 刷新游戏数据
-            fetchGameData(gameData.id);
+            console.log(`等待其他玩家确认... (${result.confirmedPlayers}/${result.totalPlayers})`);
           }
         } else {
           alert('结束故事失败：' + result.error);
@@ -746,6 +869,63 @@ export default function RoomPage() {
     } catch (error) {
       console.error('Failed to end story:', error);
       alert('结束故事失败');
+    }
+  };
+
+  // 生成游戏复盘
+  const generateGameSummary = async () => {
+    if (!gameData || !currentUser) return;
+
+    try {
+      // 设置加载状态
+      setGameSummary({
+        storyReview: '正在生成故事复盘...',
+        plotAnalysis: '正在分析精彩点...',
+        storyElevation: '正在升华故事...',
+        playerAnalysis: {}
+      });
+
+      const response = await fetch(`/api/games/${gameData.id}/generate-summary`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          playerId: currentUser.id
+        })
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        if (result.success) {
+          setGameSummary(result.summary);
+        } else {
+          console.error('生成复盘失败：', result.error);
+          // 设置错误状态
+          setGameSummary({
+            storyReview: `复盘生成失败：${result.error}`,
+            plotAnalysis: `分析生成失败：${result.error}`,
+            storyElevation: `升华生成失败：${result.error}`,
+            playerAnalysis: {}
+          });
+        }
+      } else {
+        const errorText = await response.text();
+        console.error('生成复盘请求失败：', response.status, errorText);
+        setGameSummary({
+          storyReview: `复盘生成失败：网络错误 ${response.status}`,
+          plotAnalysis: `分析生成失败：网络错误 ${response.status}`,
+          storyElevation: `升华生成失败：网络错误 ${response.status}`,
+          playerAnalysis: {}
+        });
+      }
+    } catch (error) {
+      console.error('Failed to generate summary:', error);
+      // 设置默认复盘
+      setGameSummary({
+        storyReview: '复盘生成失败，请稍后重试',
+        plotAnalysis: '分析生成失败，请稍后重试',
+        storyElevation: '升华生成失败，请稍后重试',
+        playerAnalysis: {}
+      });
     }
   };
 
@@ -773,7 +953,7 @@ export default function RoomPage() {
 
         {/* 根据游戏状态显示不同界面 */}
         {room.status === 'playing' ? (
-          renderGameInterface()
+          showGameSummary ? renderGameSummary() : renderGameInterface()
         ) : (
           <div className="flex-1 p-6">
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 max-w-7xl mx-auto">

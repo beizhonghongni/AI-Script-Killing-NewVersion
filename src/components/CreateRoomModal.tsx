@@ -10,6 +10,11 @@ interface CreateRoomModalProps {
 export default function CreateRoomModal({ onClose, onSubmit }: CreateRoomModalProps) {
   const [roomName, setRoomName] = useState('');
 
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    console.log('Input change:', e.target.value);
+    setRoomName(e.target.value);
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!roomName.trim()) return;
@@ -20,8 +25,8 @@ export default function CreateRoomModal({ onClose, onSubmit }: CreateRoomModalPr
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-      <div className="bg-game-card rounded-xl p-6 w-full max-w-md mx-4">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50" onClick={(e) => e.stopPropagation()}>
+      <div className="bg-game-card rounded-xl p-6 w-full max-w-md mx-4 relative z-60" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-semibold text-white">创建游戏房间</h2>
           <button
@@ -40,9 +45,19 @@ export default function CreateRoomModal({ onClose, onSubmit }: CreateRoomModalPr
             <input
               type="text"
               value={roomName}
-              onChange={(e) => setRoomName(e.target.value)}
-              className="input-field w-full"
+              onChange={handleInputChange}
+              onFocus={(e) => console.log('Input focused')}
+              onClick={(e) => console.log('Input clicked')}
+              className="input-field w-full cursor-text"
               placeholder="请输入房间名称"
+              autoComplete="off"
+              autoFocus
+              style={{
+                pointerEvents: 'auto',
+                userSelect: 'text',
+                fontSize: '16px',
+                lineHeight: '1.5'
+              }}
               required
             />
           </div>
