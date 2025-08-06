@@ -23,9 +23,10 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [currentUser, setCurrentUser] = useState<User>(user);
 
   useEffect(() => {
+    // 确保立即获取最新的用户数据
+    fetchUserData();
     fetchRooms();
     fetchFriends();
-    fetchUserData();
     
     // 添加自定义事件监听器来刷新用户数据
     const handleUserDataUpdate = () => {
@@ -37,19 +38,24 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     return () => {
       window.removeEventListener('userDataUpdated', handleUserDataUpdate);
     };
-  }, []);
+  }, [user.id]); // 添加user.id作为依赖
 
   // 获取最新的用户数据
   const fetchUserData = async () => {
     try {
+      console.log('Fetching user data for ID:', user.id);
       const response = await fetch(`/api/users/${user.id}/profile`);
       if (response.ok) {
         const data = await response.json();
+        console.log('User data response:', data);
         if (data.success) {
+          console.log('Setting current user with collected scripts:', data.user.collectedScripts);
           setCurrentUser(data.user);
           // 更新 sessionStorage 中的用户数据
           sessionStorage.setItem('currentUser', JSON.stringify(data.user));
         }
+      } else {
+        console.error('Failed to fetch user data:', response.status);
       }
     } catch (error) {
       console.error('Failed to fetch user data:', error);
@@ -190,12 +196,12 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                       🧪 测试导入
                     </button>
                     <span className="text-sm text-gray-400">
-                      {currentUser.collectedScripts?.length || 0} 个
+                      {currentUser?.collectedScripts?.length || 0} 个
                     </span>
                   </div>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  {(!currentUser.collectedScripts || currentUser.collectedScripts.length === 0) ? (
+                  {(!currentUser?.collectedScripts || currentUser.collectedScripts.length === 0) ? (
                     <div className="text-center py-8">
                       <div className="text-4xl mb-3">📖</div>
                       <p className="text-gray-400 text-sm">暂无收藏剧本</p>
@@ -211,7 +217,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                         >
                           <h4 className="text-white text-sm font-medium">{script.title}</h4>
                           <p className="text-gray-400 text-xs mt-1">
-                            {script.rounds}轮 · {new Date(script.collectedAt).toLocaleDateString()}
+                            {script.rounds}轮 · {script.collectedAt ? new Date(script.collectedAt).toLocaleDateString() : '收藏时间未知'}
                           </p>
                           <p className="text-gray-500 text-xs mt-1 line-clamp-2">
                             {script.background}

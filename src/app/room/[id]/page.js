@@ -19,7 +19,7 @@ export default function RoomPage() {
   const [room, setRoom] = useState(null);
   const [currentUser, setCurrentUser] = useState(null);
   const [players, setPlayers] = useState([]);
-  const [rounds, setRounds] = useState('6');
+  const [rounds, setRounds] = useState('3');
   const [plotRequirement, setPlotRequirement] = useState('');
   const [selectedAITypes, setSelectedAITypes] = useState(new Map()); // 改为Map存储数量
   const [loading, setLoading] = useState(true);
@@ -35,6 +35,7 @@ export default function RoomPage() {
   const [pollingInterval, setPollingInterval] = useState(null); // 轮询定时器
   const chatContainerRef = useRef(null); // 聊天容器引用
   const plotContainerRef = useRef(null); // 剧情容器引用
+  const cluesContainerRef = useRef(null); // 私人线索容器引用
 
   useEffect(() => {
     // 使用sessionStorage而不是localStorage，避免多标签页冲突
@@ -140,6 +141,18 @@ export default function RoomPage() {
     }
   }, [gameData?.roundRecords?.length, gameData?.script?.roundContents]);
 
+  // 自动滚动到最新线索
+  useEffect(() => {
+    if (cluesContainerRef.current && gameData?.roundRecords?.length) {
+      // 延迟一点执行，确保DOM已更新
+      setTimeout(() => {
+        if (cluesContainerRef.current) {
+          cluesContainerRef.current.scrollTop = cluesContainerRef.current.scrollHeight;
+        }
+      }, 200);
+    }
+  }, [gameData?.roundRecords?.length]);
+
   const fetchRoomData = async () => {
     try {
       const response = await fetch(`/api/rooms/${params.id}`);
@@ -206,24 +219,23 @@ export default function RoomPage() {
         // 检查轮次是否发生变化
         if (gameData && newGameData.roundRecords.length !== gameData.roundRecords.length) {
           console.log('游戏轮次发生变化，刷新界面');
-          // 轮次变化时的特殊处理
-          const currentRound = newGameData.roundRecords.length - 1;
-          if (currentRound >= 0) {
-            setChatMessages(newGameData.roundRecords[currentRound]?.messages || []);
-          }
-        } else if (gameData) {
-          // 更新当前轮次的聊天消息
-          const currentRound = newGameData.roundRecords.length - 1;
-          if (currentRound >= 0) {
-            setChatMessages(newGameData.roundRecords[currentRound]?.messages || []);
-          }
-        } else {
-          // 首次加载
-          const currentRound = newGameData.roundRecords.length - 1;
-          if (currentRound >= 0) {
-            setChatMessages(newGameData.roundRecords[currentRound]?.messages || []);
+        }
+        
+        // 更新聊天消息：合并所有轮次的聊天记录
+        const allMessages = [];
+        if (newGameData.roundRecords && newGameData.roundRecords.length > 0) {
+          for (const roundRecord of newGameData.roundRecords) {
+            if (roundRecord.messages && roundRecord.messages.length > 0) {
+              // 为每条消息添加轮次信息
+              const messagesWithRound = roundRecord.messages.map(msg => ({
+                ...msg,
+                roundNumber: roundRecord.round
+              }));
+              allMessages.push(...messagesWithRound);
+            }
           }
         }
+        setChatMessages(allMessages);
         
         setGameData(newGameData);
         
@@ -281,8 +293,8 @@ export default function RoomPage() {
     }
 
     const roundCount = parseInt(rounds);
-    if (isNaN(roundCount) || roundCount < 1 || roundCount > 20) {
-      alert('请输入有效的轮数（1-20）');
+    if (isNaN(roundCount) || roundCount < 1 || roundCount > 30) {
+      alert('请输入有效的轮数（1-30）');
       return;
     }
 
@@ -625,36 +637,67 @@ export default function RoomPage() {
               className="flex-1 px-6 pb-4 overflow-y-auto min-h-0"
               style={{ maxHeight: 'calc(100vh - 400px)' }}
             >
-              <div className="space-y-3">
-                {chatMessages.map((message) => (
-                  <div
-                    key={message.id}
-                    className={`p-3 rounded-lg max-w-[80%] ${
-                      message.isNPC
-                        ? 'bg-blue-600/20 border border-blue-500/30 ml-4'
-                        : message.senderId === currentUser?.id
-                        ? 'bg-purple-600/20 border border-purple-500/30 ml-auto'
-                        : 'bg-slate-600/20 border border-slate-500/30'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-2 mb-1">
-                      <span className={`text-sm font-medium ${
-                        message.isNPC ? 'text-blue-300' : 'text-purple-300'
-                      }`}>
-                        {message.senderName || '匿名'}
-                      </span>
-                      <span className="text-xs text-slate-400">
-                        {new Date(message.timestamp).toLocaleTimeString()}
-                      </span>
+              <div className="space-y-4">
+                {(() => {
+                  // 按轮次分组聊天记录
+                  const messagesByRound = {};
+                  chatMessages.forEach(message => {
+                    const round = message.roundNumber || 1;
+                    if (!messagesByRound[round]) {
+                      messagesByRound[round] = [];
+                    }
+                    messagesByRound[round].push(message);
+                  });
+
+                  const rounds = Object.keys(messagesByRound).sort((a, b) => Number(a) - Number(b));
+                  
+                  if (rounds.length === 0) {
+                    return (
+                      <div className="text-center text-slate-400 py-8">
+                        暂无讨论内容，开始你的推理吧！
+                      </div>
+                    );
+                  }
+
+                  return rounds.map(round => (
+                    <div key={round} className="space-y-3">
+                      {/* 轮次分隔符 */}
+                      <div className="flex items-center justify-center my-4">
+                        <div className="flex-1 h-px bg-purple-500/30"></div>
+                        <div className="px-4 py-1 bg-purple-600/20 border border-purple-500/30 rounded-full text-purple-300 text-xs font-medium">
+                          第 {round} 轮讨论
+                        </div>
+                        <div className="flex-1 h-px bg-purple-500/30"></div>
+                      </div>
+                      
+                      {/* 该轮次的消息 */}
+                      {messagesByRound[round].map((message) => (
+                        <div
+                          key={message.id}
+                          className={`p-3 rounded-lg max-w-[80%] ${
+                            message.isNPC
+                              ? 'bg-blue-600/20 border border-blue-500/30 ml-4'
+                              : message.senderId === currentUser?.id
+                              ? 'bg-purple-600/20 border border-purple-500/30 ml-auto'
+                              : 'bg-slate-600/20 border border-slate-500/30'
+                          }`}
+                        >
+                          <div className="flex items-center space-x-2 mb-1">
+                            <span className={`text-sm font-medium ${
+                              message.isNPC ? 'text-blue-300' : 'text-purple-300'
+                            }`}>
+                              {message.senderName || '匿名'}
+                            </span>
+                            <span className="text-xs text-slate-400">
+                              {new Date(message.timestamp).toLocaleTimeString()}
+                            </span>
+                          </div>
+                          <div className="text-white text-sm">{message.content}</div>
+                        </div>
+                      ))}
                     </div>
-                    <div className="text-white text-sm">{message.content}</div>
-                  </div>
-                ))}
-                {chatMessages.length === 0 && (
-                  <div className="text-center text-slate-400 py-8">
-                    暂无讨论内容，开始你的推理吧！
-                  </div>
-                )}
+                  ));
+                })()}
               </div>
             </div>
             {/* 消息输入 */}
@@ -751,7 +794,11 @@ export default function RoomPage() {
               }
 
               return (
-                <div className="max-h-full overflow-y-auto space-y-4">
+                <div 
+                  ref={cluesContainerRef}
+                  className="max-h-full overflow-y-auto space-y-4"
+                  style={{ scrollBehavior: 'smooth' }}
+                >
                   {allClues.map((clueData) => (
                     <div 
                       key={clueData.round}
@@ -965,11 +1012,16 @@ export default function RoomPage() {
       if (response.ok) {
         const result = await response.json();
         if (result.success && result.message) {
-          setChatMessages([...chatMessages, result.message]);
+          // 为新消息添加轮次信息
+          const messageWithRound = {
+            ...result.message,
+            roundNumber: gameData?.roundRecords?.length || 1
+          };
+          setChatMessages([...chatMessages, messageWithRound]);
           setNewMessage('');
           
           // 触发AI NPC轮询回复
-          triggerAIPollingResponse(result.message);
+          triggerAIPollingResponse(messageWithRound);
         }
       }
     } catch (error) {
@@ -1459,12 +1511,11 @@ export default function RoomPage() {
                       <input
                         type="number"
                         min="1"
-                        max="20"
+                        max="30"
                         value={rounds}
                         onChange={(e) => setRounds(e.target.value)}
-                        onFocus={(e) => console.log('Input focused')}
-                        className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 cursor-text"
-                        placeholder="输入游戏轮数（1-20）"
+                        className="w-full px-4 py-2 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                        placeholder="输入游戏轮数（1-30）"
                         autoComplete="off"
                         disabled={!!room.collectedScript}
                       />
@@ -1478,9 +1529,7 @@ export default function RoomPage() {
                       <textarea
                         value={plotRequirement}
                         onChange={(e) => setPlotRequirement(e.target.value)}
-                        onFocus={(e) => console.log('Textarea focused')}
-                        onClick={(e) => e.target.focus()}
-                        className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none cursor-text"
+                        className="w-full px-4 py-3 bg-slate-700 border border-slate-600 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-500 resize-none"
                         style={{
                           minHeight: '120px',
                           fontFamily: 'inherit',
