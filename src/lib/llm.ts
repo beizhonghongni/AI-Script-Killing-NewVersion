@@ -201,7 +201,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 2. ${totalCharacters}个角色（包含姓名、身份、性格特点）
    - 前${playerCount}个角色是重要角色（给真人玩家）
    - 后${aiNPCCount}个角色是次要角色（给AI NPC）
-3. 每轮的剧情发展（每轮400-500字）
+3. 每轮的剧情发展（每轮必须500-600字，详细描述情节发展、环境细节、人物反应等）
 4. 每轮每个角色的私人线索（每个50-80字，要有差异性和关联性）
 
 输出格式必须是严格的JSON格式：
@@ -235,6 +235,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 - 后${aiNPCCount}个角色是配角或旁观者（次要角色）
 - 私人线索之间有关联但又各不相同
 - 角色姓名要符合剧情背景
+- **重要：每轮剧情必须达到500-600字，要包含丰富的细节描述、环境渲染、人物情感和情节推进**
 `;
 
   const response = await callLLM(prompt, true);
@@ -307,10 +308,10 @@ NPC信息：
 最近的讨论记录：
 ${recentMessages.map(msg => `${msg.senderName}: ${msg.content}`).join('\n')}
 
-${lastMessage ? `
-最新发言是 ${lastMessage.senderName} 说的："${lastMessage.content}"
-请特别考虑是否要回应这条最新发言。
-` : ''}
+// ${lastMessage ? `
+// 最新发言是 ${lastMessage.senderName} 说的："${lastMessage.content}"
+// 请重点考虑这条最新发言。
+// ` : ''}
 
 请决定：
 1. 是否需要发言（重点考虑是否要回应最新发言、讨论热度、是否有新信息、角色性格等）
@@ -564,9 +565,10 @@ ${allCharacters.map(c => `${c.name}（${c.identity}）`).join('、')}
    - 突出与该角色相关的信息
    - 适当增加该角色的个人动机和秘密
 
-2. 每轮的个人剧情内容（每轮80-120字）
-   - 从该角色视角描述剧情发展
-   - 包含该角色独有的观察和感受
+2. 每轮的个人剧情内容（每轮必须400-500字）
+   - 从该角色视角详细描述剧情发展
+   - 包含该角色独有的观察、感受和内心活动
+   - 添加环境细节和情感描述
 
 基础轮次剧情参考：
 ${baseScript.roundContents.map(rc => `第${rc.round}轮：${rc.plot}`).join('\n')}
@@ -588,6 +590,7 @@ ${baseScript.roundContents.map(rc => `第${rc.round}轮：${rc.plot}`).join('\n'
 - 主角应该获得更多关键信息
 - 配角应该有辅助性的信息和视角
 - 保持与基础剧情的一致性，但增加个人特色
+- **重要：每轮个人剧情必须达到400-500字，要有丰富的细节和情感描述**
 `;
 
   try {
