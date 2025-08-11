@@ -9,6 +9,8 @@ export interface User {
   collectedScripts?: CollectedScript[]; // 收藏的游戏剧本
   chatHistory: { [friendId: string]: ChatMessage[] };
   gameHistory: GameRecord[];
+  // 我将自己的发言风格授权给哪些好友（可用于好友在其游戏中添加“我的风格”的AINPC）
+  styleGrantsTo?: string[];
 }
 
 // 收藏剧本类型
@@ -98,6 +100,8 @@ export interface AINPCConfig {
   type?: string; // AI类型
   characterId?: string; // 分配的角色ID
   characterName?: string; // 分配的角色名
+  // 若为好友风格AI，标记来源好友
+  friendStyleOfUserId?: string;
 }
 
 // 个人剧本内容

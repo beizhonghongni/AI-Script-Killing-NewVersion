@@ -291,6 +291,7 @@ export async function getNPCAction(
   const recentMessages = currentRoundRecord.messages.slice(-10); // 最近10条消息
   const lastMessage = recentMessages[recentMessages.length - 1]; // 最后一条消息
   
+  const friendStyleHint = npc.friendStyleOfUserId ? `\n- 该AI基于一位好友的发言风格进行表达（更贴近日常聊天口吻、语气、句式），但内容需与当前剧情紧密相关。` : '';
   const prompt = `
 你正在扮演一个AI NPC角色，需要决定是否在当前讨论中发言。
 
@@ -298,6 +299,7 @@ NPC信息：
 - 姓名：${npc.name}
 - 风格：${npc.style}
 - 性格：${npc.personality}
+${friendStyleHint}
 
 故事背景：${gameRecord.scriptBackground}
 

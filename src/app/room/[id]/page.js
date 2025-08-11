@@ -26,6 +26,9 @@ export default function RoomPage() {
   const [gameData, setGameData] = useState(null);
   const [chatMessages, setChatMessages] = useState([]);
   const [newMessage, setNewMessage] = useState('');
+  const [sttOn, setSttOn] = useState(false); // 语音转文字是否进行中
+  const [sttError, setSttError] = useState('');
+  const sttRecognizerRef = useRef(null);
   const [readyPlayers, setReadyPlayers] = useState(new Set()); // 已准备的玩家
   const [showGameSummary, setShowGameSummary] = useState(false); // 显示游戏复盘
   const [gameSummary, setGameSummary] = useState(null); // 游戏复盘数据
@@ -39,6 +42,8 @@ export default function RoomPage() {
   const [previousRoundCount, setPreviousRoundCount] = useState(0); // 记录之前的轮次数量
   const [userScrolledUpPlot, setUserScrolledUpPlot] = useState(false); // 用户是否在剧情区域向上滚动
   const [userScrolledUpClues, setUserScrolledUpClues] = useState(false); // 用户是否在线索区域向上滚动
+  const [friendStyles, setFriendStyles] = useState([]); // 我可用的好友风格
+  const [selectedFriendStyles, setSelectedFriendStyles] = useState([]); // 选中的好友风格AI列表
   const chatContainerRef = useRef(null); // 聊天容器引用
   const plotContainerRef = useRef(null); // 剧情容器引用
   const cluesContainerRef = useRef(null); // 私人线索容器引用
@@ -55,6 +60,21 @@ export default function RoomPage() {
 
     fetchRoomData();
   }, [params.id, router]);
+
+  // 拉取我可用的好友风格（对方授权给我的）
+  useEffect(() => {
+    const loadFriendStyles = async () => {
+      if (!currentUser) return;
+      try {
+        const res = await fetch(`/api/users/${currentUser.id}/friend-styles`);
+        const data = await res.json();
+        if (data.success) setFriendStyles(data.friendStyles || []);
+      } catch (e) {
+        console.error('Failed to fetch friend styles', e);
+      }
+    };
+    loadFriendStyles();
+  }, [currentUser?.id]);
 
   // 启动实时同步轮询
   useEffect(() => {
@@ -428,7 +448,8 @@ export default function RoomPage() {
         body: JSON.stringify({
           rounds: roundCount,
           plotRequirement,
-          aiNPCTypes: aiNPCTypes
+          aiNPCTypes: aiNPCTypes,
+          friendStyleNPCs: selectedFriendStyles // 可能为空
         })
       });
 
@@ -473,6 +494,68 @@ export default function RoomPage() {
     } finally {
       setStartingGame(false); // 结束加载状态
     }
+  };
+
+  // ===== 语音转文字（Azure Speech SDK，浏览器端） =====
+  const beginSTT = async () => {
+    try {
+      setSttError('');
+      // 获取凭据
+      const res = await fetch('/api/speech/token');
+      const data = await res.json();
+      if (!data.success) throw new Error(data.error || '无法获取语音服务配置');
+
+      // 动态加载 SDK（避免SSR问题）
+      const sdk = await import('microsoft-cognitiveservices-speech-sdk');
+      const speechConfig = sdk.SpeechConfig.fromEndpoint(new URL(data.endpoint), data.key);
+      // 设定识别语言（中文）
+      speechConfig.speechRecognitionLanguage = 'zh-CN';
+
+      const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
+      const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
+      sttRecognizerRef.current = recognizer;
+
+      setSttOn(true);
+      // 使用连续识别，聚合中间结果
+      let agg = '';
+      recognizer.recognizing = (s, e) => {
+        // 中间结果不直接覆盖，展示到输入框中
+        if (e.result && e.result.text) {
+          setNewMessage((prev) => (agg || prev));
+        }
+      };
+      recognizer.recognized = (s, e) => {
+        if (e.result && e.result.text) {
+          agg += (agg ? ' ' : '') + e.result.text;
+          setNewMessage(agg);
+        }
+      };
+      recognizer.canceled = (s, e) => {
+        setSttOn(false);
+        if (e && e.errorDetails) setSttError(e.errorDetails);
+      };
+      recognizer.sessionStopped = () => {
+        setSttOn(false);
+      };
+      await new Promise((resolve, reject) => {
+        recognizer.startContinuousRecognitionAsync(() => resolve(null), (err) => reject(err));
+      });
+    } catch (err) {
+      setSttError(err.message || '语音识别启动失败');
+      setSttOn(false);
+    }
+  };
+
+  const endSTT = async () => {
+    try {
+      const recognizer = sttRecognizerRef.current;
+      if (recognizer) {
+        await new Promise((resolve) => recognizer.stopContinuousRecognitionAsync(() => resolve(null)));
+        recognizer.close();
+        sttRecognizerRef.current = null;
+      }
+    } catch {}
+    setSttOn(false);
   };
 
   const leaveRoom = async () => {
@@ -848,6 +931,14 @@ export default function RoomPage() {
             {/* 消息输入 */}
             <div className="p-6 pt-4 border-t border-purple-500/20 flex-shrink-0">
               <div className="flex space-x-3">
+                {/* 语音转文字控制 */}
+                <button
+                  onClick={sttOn ? endSTT : beginSTT}
+                  className={`px-3 py-2 rounded-lg text-white ${sttOn ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}
+                  title={sttOn ? '已说完' : '点我开麦' }
+                >
+                  {sttOn ? '已说完' : '语音'}
+                </button>
                 <input
                   type="text"
                   value={newMessage}
@@ -863,6 +954,7 @@ export default function RoomPage() {
                   发送
                 </button>
               </div>
+              {sttError && <div className="text-red-400 text-xs mt-2">{sttError}</div>}
             </div>
           </div>
         </div>
@@ -1651,6 +1743,9 @@ export default function RoomPage() {
                         );
                       })}
                     </div>
+
+                    {/* 好友风格 AINPC 选择 */}
+                    <FriendStylePicker currentUser={currentUser} onChange={(list) => setSelectedFriendStyles(list)} />
                   </div>
                 )}
               </div>
@@ -1763,6 +1858,76 @@ export default function RoomPage() {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// 简易的好友风格选择器
+function FriendStylePicker({ currentUser, onChange }) {
+  const [items, setItems] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const load = async () => {
+      if (!currentUser) return;
+      setLoading(true);
+      try {
+        const res = await fetch(`/api/users/${currentUser.id}/friend-styles`);
+        const data = await res.json();
+        if (data.success) setItems(data.friendStyles || []);
+      } catch (e) {
+        setError('加载好友风格失败');
+      } finally {
+        setLoading(false);
+      }
+    };
+    load();
+  }, [currentUser?.id]);
+
+  const [selected, setSelected] = useState([]);
+
+  useEffect(() => { onChange(selected); }, [selected]);
+
+  const toggle = (fs) => {
+    const exists = selected.find((s) => s.userId === fs.userId);
+    if (exists) {
+      setSelected(selected.filter((s) => s.userId !== fs.userId));
+    } else {
+      setSelected([...selected, { userId: fs.userId, username: fs.username, styleText: fs.recentStyleSample }]);
+    }
+  };
+
+  return (
+    <div className="mt-6">
+      <div className="flex items-center justify-between mb-2">
+        <div className="text-white font-medium">好友风格 AINPC（可选）</div>
+        <div className="text-xs text-slate-400">选择被授权给你的好友风格</div>
+      </div>
+      {loading ? (
+        <div className="text-slate-300 text-sm">加载中...</div>
+      ) : error ? (
+        <div className="text-red-400 text-sm">{error}</div>
+      ) : items.length === 0 ? (
+        <div className="text-slate-400 text-sm">暂无可用好友风格</div>
+      ) : (
+        <div className="space-y-2">
+          {items.map((fs) => {
+            const checked = !!selected.find((s) => s.userId === fs.userId);
+            return (
+              <label key={fs.userId} className={`block p-3 rounded border ${checked ? 'border-purple-400 bg-purple-600/20' : 'border-slate-600 bg-slate-700/40'}`}>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-white text-sm">{fs.username} 的风格</div>
+                    <div className="text-slate-300 text-xs mt-1 line-clamp-2">{fs.recentStyleSample || '暂无样本'}</div>
+                  </div>
+                  <input type="checkbox" className="w-4 h-4" checked={checked} onChange={() => toggle(fs)} />
+                </div>
+              </label>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
