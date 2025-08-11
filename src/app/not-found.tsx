@@ -1,3 +1,5 @@
+import Link from 'next/link';
+
 export default function NotFound() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex items-center justify-center">
@@ -7,12 +9,12 @@ export default function NotFound() {
         <p className="text-slate-300 mb-6">
           您访问的页面不存在或已被删除。
         </p>
-        <a
+        <Link
           href="/"
           className="inline-block px-6 py-3 bg-purple-600 hover:bg-purple-700 text-white rounded-lg transition-colors"
         >
           返回主页
-        </a>
+        </Link>
       </div>
     </div>
   );
