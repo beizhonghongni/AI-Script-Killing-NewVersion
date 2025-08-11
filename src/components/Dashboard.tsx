@@ -19,6 +19,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [showTestImport, setShowTestImport] = useState(false);
   const [rooms, setRooms] = useState<Room[]>([]);
   const [friends, setFriends] = useState([]);
+  const [styleGrants, setStyleGrants] = useState<string[]>([]);
   const [selectedCollectedScript, setSelectedCollectedScript] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<User>(user);
 
@@ -26,7 +27,8 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     // 确保立即获取最新的用户数据
     fetchUserData();
     fetchRooms();
-    fetchFriends();
+  fetchFriends();
+  fetchStyleGrants();
     
     // 添加自定义事件监听器来刷新用户数据
     const handleUserDataUpdate = () => {
@@ -83,6 +85,37 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       }
     } catch (error) {
       console.error('Failed to fetch friends:', error);
+    }
+  };
+
+  const fetchStyleGrants = async () => {
+    try {
+      const res = await fetch(`/api/users/${user.id}/style-grants`);
+      const data = await res.json();
+      if (data.success) setStyleGrants(data.grants || []);
+    } catch (e) {
+      console.error('Failed to fetch style grants', e);
+    }
+  };
+
+  const toggleGrant = async (friendId: string, isGranted: boolean) => {
+    try {
+      if (isGranted) {
+        // revoke
+        const res = await fetch(`/api/users/${user.id}/style-grants?friendId=${friendId}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (data.success) setStyleGrants(data.grants || []);
+      } else {
+        const res = await fetch(`/api/users/${user.id}/style-grants`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ friendId })
+        });
+        const data = await res.json();
+        if (data.success) setStyleGrants(data.grants || []);
+      }
+    } catch (e) {
+      console.error('Toggle style grant failed', e);
     }
   };
 
@@ -167,7 +200,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                   </span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <FriendsList friends={friends} />
+                  <FriendsList friends={friends} currentUserId={currentUser.id} styleGrants={styleGrants} onToggleGrant={toggleGrant} />
                 </div>
               </div>
             </div>
