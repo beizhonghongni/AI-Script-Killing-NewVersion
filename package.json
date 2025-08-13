@@ -17,7 +17,7 @@
     "autoprefixer": "^10.0.1",
     "eslint": "^8",
     "eslint-config-next": "15.4.5",
-    "microsoft-cognitiveservices-speech-sdk": "^1.45.0",
+    
     "multer": "^2.0.2",
     "next": "15.4.5",
     "pdf-parse": "^1.1.1",

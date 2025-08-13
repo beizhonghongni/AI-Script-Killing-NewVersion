@@ -29,6 +29,8 @@ export default function RoomPage() {
   const [sttOn, setSttOn] = useState(false); // 语音转文字是否进行中
   const [sttError, setSttError] = useState('');
   const sttRecognizerRef = useRef(null);
+  const sttMediaRecorderRef = useRef(null);
+  const sttChunksRef = useRef([]);
   const [readyPlayers, setReadyPlayers] = useState(new Set()); // 已准备的玩家
   const [showGameSummary, setShowGameSummary] = useState(false); // 显示游戏复盘
   const [gameSummary, setGameSummary] = useState(null); // 游戏复盘数据
@@ -263,9 +265,14 @@ export default function RoomPage() {
     
     if (hasNewRound) {
       // 只有在用户没有向上滚动时才自动滚动
-      if (cluesContainerRef.current && !userScrolledUpClues) {
+      if (!userScrolledUpClues) {
         setTimeout(() => {
-          if (cluesContainerRef.current) {
+          const currentRound = gameData?.roundRecords?.length || 0;
+          const target = document.querySelector(`#clue-round-${currentRound}`);
+          if (target && typeof target.scrollIntoView === 'function') {
+            target.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          } else if (cluesContainerRef.current) {
+            // fallback
             cluesContainerRef.current.scrollTop = cluesContainerRef.current.scrollHeight;
           }
         }, 200);
@@ -496,64 +503,55 @@ export default function RoomPage() {
     }
   };
 
-  // ===== 语音转文字（Azure Speech SDK，浏览器端） =====
+  // ===== 语音转文字（Aliyun DashScope via server transcription） =====
   const beginSTT = async () => {
     try {
       setSttError('');
-      // 获取凭据
-      const res = await fetch('/api/speech/token');
-      const data = await res.json();
-      if (!data.success) throw new Error(data.error || '无法获取语音服务配置');
-
-      // 动态加载 SDK（避免SSR问题）
-      const sdk = await import('microsoft-cognitiveservices-speech-sdk');
-      const speechConfig = sdk.SpeechConfig.fromEndpoint(new URL(data.endpoint), data.key);
-      // 设定识别语言（中文）
-      speechConfig.speechRecognitionLanguage = 'zh-CN';
-
-      const audioConfig = sdk.AudioConfig.fromDefaultMicrophoneInput();
-      const recognizer = new sdk.SpeechRecognizer(speechConfig, audioConfig);
-      sttRecognizerRef.current = recognizer;
-
+      // Request mic
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mr = new MediaRecorder(stream, { mimeType: 'audio/webm' });
+      sttMediaRecorderRef.current = mr;
+      sttChunksRef.current = [];
+      mr.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) sttChunksRef.current.push(e.data);
+      };
+      mr.onstop = async () => {
+        try {
+          const blob = new Blob(sttChunksRef.current, { type: 'audio/webm' });
+          const form = new FormData();
+          form.append('audio', blob, 'speech.webm');
+          form.append('language', 'zh');
+          const dashscopeKey = typeof window !== 'undefined' ? sessionStorage.getItem('dashscopeKey') : null;
+          const res = await fetch('/api/speech/transcribe', {
+            method: 'POST',
+            headers: dashscopeKey ? { 'x-dashscope-key': dashscopeKey } : undefined,
+            body: form,
+          });
+          const data = await res.json();
+          if (!data.success) throw new Error(data.error || '转写失败');
+          setNewMessage((prev) => (prev ? `${prev} ${data.text}` : data.text));
+        } catch (err) {
+          setSttError(err.message || '转写失败');
+        } finally {
+          // stop tracks
+          stream.getTracks().forEach(t => t.stop());
+        }
+      };
+      mr.start();
       setSttOn(true);
-      // 使用连续识别，聚合中间结果
-      let agg = '';
-      recognizer.recognizing = (s, e) => {
-        // 中间结果不直接覆盖，展示到输入框中
-        if (e.result && e.result.text) {
-          setNewMessage((prev) => (agg || prev));
-        }
-      };
-      recognizer.recognized = (s, e) => {
-        if (e.result && e.result.text) {
-          agg += (agg ? ' ' : '') + e.result.text;
-          setNewMessage(agg);
-        }
-      };
-      recognizer.canceled = (s, e) => {
-        setSttOn(false);
-        if (e && e.errorDetails) setSttError(e.errorDetails);
-      };
-      recognizer.sessionStopped = () => {
-        setSttOn(false);
-      };
-      await new Promise((resolve, reject) => {
-        recognizer.startContinuousRecognitionAsync(() => resolve(null), (err) => reject(err));
-      });
     } catch (err) {
-      setSttError(err.message || '语音识别启动失败');
+      setSttError(err.message || '无法访问麦克风');
       setSttOn(false);
     }
   };
 
   const endSTT = async () => {
     try {
-      const recognizer = sttRecognizerRef.current;
-      if (recognizer) {
-        await new Promise((resolve) => recognizer.stopContinuousRecognitionAsync(() => resolve(null)));
-        recognizer.close();
-        sttRecognizerRef.current = null;
+      const mr = sttMediaRecorderRef.current;
+      if (mr && mr.state !== 'inactive') {
+        mr.stop();
       }
+      sttMediaRecorderRef.current = null;
     } catch {}
     setSttOn(false);
   };
@@ -1037,9 +1035,10 @@ export default function RoomPage() {
                     className="max-h-full overflow-y-auto space-y-4"
                     style={{ scrollBehavior: 'smooth' }}
                   >
-                    {allClues.map((clueData) => (
+          {allClues.map((clueData) => (
                       <div 
-                        key={clueData.round}
+            key={clueData.round}
+            id={`clue-round-${clueData.round}`}
                         className={`rounded-xl border transition-all ${
                           clueData.isCurrentRound 
                             ? 'bg-slate-800/70 border-purple-500/50 ring-1 ring-purple-500/30' 

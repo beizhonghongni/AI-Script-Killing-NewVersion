@@ -76,6 +76,23 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
     }
   };
 
+  // 轮询刷新房间列表，让大厅自动出现新房间（无需手动刷新）
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const response = await fetch('/api/rooms');
+        const data = await response.json();
+        if (data.success) {
+          setRooms(data.rooms);
+        }
+      } catch (error) {
+        // 静默失败即可，避免打扰用户
+      }
+    }, 2000); // 每2秒拉取一次
+
+    return () => clearInterval(interval);
+  }, []);
+
   const fetchFriends = async () => {
     try {
       const response = await fetch(`/api/users/${currentUser.id}/friends`);
