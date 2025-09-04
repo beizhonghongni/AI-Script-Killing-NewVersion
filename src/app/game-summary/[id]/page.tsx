@@ -60,7 +60,8 @@ export default function GameSummaryPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          playerId: currentUserId
+          playerId: currentUserId,
+          force: true
         })
       });
 

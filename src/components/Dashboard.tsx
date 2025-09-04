@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { User, Room } from '@/types';
 import FriendsList from './FriendsList';
+import ChatModal from './ChatModal';
 import RoomsList from './RoomsList';
 import CreateRoomModal from './CreateRoomModal';
 import ImportScriptModal from './ImportScriptModal';
@@ -22,6 +23,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [styleGrants, setStyleGrants] = useState<string[]>([]);
   const [selectedCollectedScript, setSelectedCollectedScript] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<User>(user);
+  const [chatFriend, setChatFriend] = useState<any>(null);
 
   useEffect(() => {
     // 确保立即获取最新的用户数据
@@ -217,7 +219,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                   </span>
                 </div>
                 <div className="flex-1 overflow-y-auto">
-                  <FriendsList friends={friends} currentUserId={currentUser.id} styleGrants={styleGrants} onToggleGrant={toggleGrant} />
+                  <FriendsList friends={friends} currentUserId={currentUser.id} styleGrants={styleGrants} onToggleGrant={toggleGrant} onChat={(f:any)=> setChatFriend(f)} />
                 </div>
               </div>
             </div>
@@ -333,6 +335,14 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           isOpen={showTestImport}
           onClose={() => setShowTestImport(false)}
           onSuccess={handleImportSuccess}
+        />
+      )}
+      {chatFriend && (
+        <ChatModal
+          user={currentUser}
+          friend={chatFriend}
+          onClose={()=> setChatFriend(null)}
+          collectedScripts={currentUser?.collectedScripts || []}
         />
       )}
     </div>

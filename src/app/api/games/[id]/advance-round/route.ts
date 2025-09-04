@@ -4,10 +4,11 @@ import { getGameRecordById, updateGameRecord, getScriptById } from '@/lib/storag
 // 房主控制进入下一轮
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ id: string }> }
+  context: any
 ) {
   try {
-    const { id } = await context.params;
+    const rawParams = context?.params ? (context.params.then ? await context.params : context.params) : {};
+    const { id } = rawParams as { id?: string };
     const { currentRound, nextRound } = await request.json();
 
     // 获取游戏记录

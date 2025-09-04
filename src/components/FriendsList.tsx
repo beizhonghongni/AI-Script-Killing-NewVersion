@@ -11,9 +11,10 @@ interface FriendsListProps {
   currentUserId?: string;
   styleGrants?: string[]; // 当前用户已授权的好友ID
   onToggleGrant?: (friendId: string, isGranted: boolean) => void;
+  onChat?: (friend: Friend) => void;
 }
 
-export default function FriendsList({ friends, styleGrants = [], onToggleGrant }: FriendsListProps) {
+export default function FriendsList({ friends, styleGrants = [], onToggleGrant, onChat }: FriendsListProps) {
   if (friends.length === 0) {
     return (
       <div className="text-center py-6">
@@ -41,7 +42,7 @@ export default function FriendsList({ friends, styleGrants = [], onToggleGrant }
           </div>
           
           <div className="flex space-x-1">
-            <button className="btn-secondary px-2 py-1 text-xs">
+            <button className="btn-secondary px-2 py-1 text-xs" onClick={() => onChat && onChat(friend)}>
               聊天
             </button>
             {friend.isOnline && (

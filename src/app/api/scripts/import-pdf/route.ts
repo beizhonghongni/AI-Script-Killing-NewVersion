@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getScripts, saveScripts } from '@/lib/storage';
 import { callLLM } from '@/lib/llm';
-import pdfParse from 'pdf-parse';
+// 延迟加载 pdf-parse，避免构建阶段触发其对测试资源的读取
+// (某些环境下 pdf-parse 引入时会尝试访问其测试文件导致 ENOENT)
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,13 +18,20 @@ export async function POST(request: NextRequest) {
 
     // 解析所有PDF文件内容
     const pdfContents = [];
+    // 动态导入 pdf-parse
+    const { default: pdfParse } = await import('pdf-parse');
     for (const file of files) {
       const buffer = await file.arrayBuffer();
-      const data = await pdfParse(Buffer.from(buffer));
-      pdfContents.push({
-        filename: file.name,
-        content: data.text
-      });
+      try {
+        const data = await pdfParse(Buffer.from(buffer));
+        pdfContents.push({ filename: file.name, content: data.text });
+      } catch (e) {
+        console.warn('解析单个PDF失败，跳过:', file.name, e);
+      }
+    }
+
+    if (pdfContents.length === 0) {
+      return NextResponse.json({ success: false, error: 'PDF解析失败，请确认文件内容' });
     }
 
     // 使用LLM分析PDF内容并生成剧本

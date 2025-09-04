@@ -3,14 +3,13 @@
 import { useState, useEffect } from 'react';
 import { User } from '@/types';
 
-interface LoginFormProps {
-  onLogin: (user: User) => void;
-}
+interface LoginFormProps { onLogin: (user: User) => void; }
 
 export default function LoginForm({ onLogin }: LoginFormProps) {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [mode, setMode] = useState<'login'|'register'>('login');
   const [error, setError] = useState('');
   
   const handleSubmit = async (e: React.FormEvent) => {
@@ -19,7 +18,8 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
     setError('');
     
     try {
-      const response = await fetch('/api/users', {
+  const endpoint = mode === 'login' ? '/api/users' : '/api/users/register';
+  const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -82,8 +82,15 @@ export default function LoginForm({ onLogin }: LoginFormProps) {
         disabled={loading}
         className="btn-primary w-full text-lg py-3 mt-6 disabled:opacity-50"
       >
-        {loading ? '登录中...' : '登录游戏'}
+        {loading ? (mode==='login'?'登录中...':'注册中...') : (mode==='login'?'登录游戏':'注册并登录')}
       </button>
+      <div className="text-center text-xs text-gray-400 mt-2">
+        {mode==='login' ? (
+          <span>没有账号？ <button type="button" onClick={()=> setMode('register')} className="text-blue-400 hover:underline">去注册</button></span>
+        ) : (
+          <span>已有账号？ <button type="button" onClick={()=> setMode('login')} className="text-blue-400 hover:underline">去登录</button></span>
+        )}
+      </div>
     </form>
   );
 }

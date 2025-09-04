@@ -307,17 +307,14 @@ ${friendStyleHint}
 当前剧情：${currentRoundRecord.plot}
 你的私人线索：${currentRoundRecord.privateClues[npc.id] || '无特殊线索'}
 
-最近的讨论记录：
+最近的讨论记录（按时间顺序，最后一条是最新的）：
 ${recentMessages.map(msg => `${msg.senderName}: ${msg.content}`).join('\n')}
 
-// ${lastMessage ? `
-// 最新发言是 ${lastMessage.senderName} 说的："${lastMessage.content}"
-// 请重点考虑这条最新发言。
-// ` : ''}
+${lastMessage ? `最新发言 => ${lastMessage.senderName}: ${lastMessage.content}` : ''}
 
 请决定：
 1. 是否需要发言（重点考虑是否要回应最新发言、讨论热度、是否有新信息、角色性格等）
-2. 如果发言，说什么内容（符合角色性格，最好能回应最新发言的内容，推进讨论，不要重复已说过的内容）
+2. 如果发言，说什么内容（必须使用第一人称“我”，符合角色性格，直接回应最新发言并推进讨论，不要重复已说过的内容，控制在1-2句、总字数不超过60字、不要使用叙述者视角或第三人称描述该NPC）
 
 输出格式必须是JSON：
 {
@@ -356,9 +353,35 @@ ${recentMessages.map(msg => `${msg.senderName}: ${msg.content}`).join('\n')}
     cleanedResponse = cleanedResponse.trim();
     
     const decision = JSON.parse(cleanedResponse);
+    const directAddressed = !!(lastMessage && lastMessage.content && (lastMessage.content.includes(npc.name) || /[?？]$/.test(lastMessage.content) ));
+    let content: string | undefined = undefined;
+    if (decision.shouldSpeak && typeof decision.content === 'string') {
+      let t = decision.content.trim();
+      // 去引号
+      t = t.replace(/^["“”']+|["“”']+$/g, '');
+      // 保证第一人称
+      if (!t.includes('我')) {
+        t = (t.length <= 58 ? `我觉得${t}` : `我觉得${t.slice(0, 56)}`);
+      }
+  // 不要把自己名字当成第二人称或第三人称提及，替换为“我”
+  const selfName = npc.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`);
+  const selfNameRegex = new RegExp(selfName + '(?=[，。！!？?、,\s])', 'g');
+  t = t.replace(selfNameRegex, '我');
+  // 避免“我觉得我”重复
+  t = t.replace(/我觉得我/g, '我觉得');
+      // 限长
+      if (t.length > 60) t = t.slice(0, 60);
+      content = t;
+    } else if (!decision.shouldSpeak && directAddressed) {
+      // 如果被直接点名或问号结尾却不想说，强制给一句回应
+      let t = lastMessage?.content.includes('去哪') ? '我昨天去了别的地方办点事，现在可以说明。' : '我在，刚才在整理线索，我的看法稍后说。';
+      if (t.length > 60) t = t.slice(0,60);
+      content = t;
+      decision.shouldSpeak = true;
+    }
     return {
-      shouldSpeak: decision.shouldSpeak,
-      content: decision.shouldSpeak ? decision.content : undefined
+      shouldSpeak: !!decision.shouldSpeak,
+      content
     };
   } catch (error) {
     console.error('Failed to parse NPC decision JSON:', error);
@@ -425,11 +448,18 @@ export async function generateGameSummary(
   
   const allMessages = gameRecord.roundRecords
     .flatMap(round => round.messages);
+  const realPlayers = Array.from(new Set(gameRecord.players)).map(pid => {
+    const name = allMessages.find(m => m.senderId === pid)?.senderName || pid;
+    return { id: pid, name };
+  });
   
   const prompt = `
-请为剧本杀游戏生成详细的复盘总结。
+请为剧本杀游戏生成客观理性的复盘总结，避免夸张与情绪化语气，像资深法医式记录员：
 
 故事背景：${gameRecord.scriptBackground}
+
+真人玩家列表（仅对下列玩家进行点评，忽略AI NPC）：
+${realPlayers.map(p => `- ${p.id}（${p.name}）`).join('\n')}
 
 完整游戏记录：
 ${gameRecord.roundRecords.map(round => 
@@ -440,28 +470,28 @@ ${gameRecord.roundRecords.map(round =>
 目标玩家发言记录：
 ${playerMessages.map(msg => `${msg.senderName}: ${msg.content}`).join('\n')}
 
-请生成以下内容：
+请生成以下内容（务必理性、克制、专业）：
 
-1. 故事复盘（200-300字）：整个故事的发展脉络和关键转折点
-2. 精彩点解密（150-200字）：游戏中的高光时刻和巧妙设计
-3. 故事升华（100-150字）：这个故事的深层含义和启发
+1. 故事复盘（200-300字）：按时间线概述主要事件、关键线索与转折，避免主观评价。
+2. 精彩点解密（150-200字）：指出逻辑巧点与有效推理片段，引用具体证据或发言，不夸饰。
+3. 故事总结（100-150字）：对本局结构与机制的理性总结（不使用煽情词汇）。
 
-4. 每个玩家的分析：
-   - 观点总结：该玩家在游戏中的主要观点和立场
-   - 剧情相关点评：该玩家对剧情推进的贡献
-   - 风格点评：该玩家的发言风格特点，要夸奖和鼓励
+4. 每个玩家的分析（逐个玩家，仅包含上述真人玩家；playerAnalysis的key用玩家ID）：
+   - 观点总结：该玩家的核心主张或怀疑对象（基于其发言）。
+   - 剧情相关点评：该玩家对推进调查、串联线索或证伪的具体贡献。
+   - 发言风格：简要描述其表达风格与沟通特点，保持中性、建设性，不夸大不贬损。
 
 输出格式必须是JSON：
 {
   "storyReview": "故事复盘",
   "plotAnalysis": "精彩点解密", 
-  "storyElevation": "故事升华",
+  "storyElevation": "故事总结",
   "playerAnalysis": {
     "玩家ID": {
       "playerName": "玩家名称",
       "viewpointSummary": "观点总结",
       "plotRelatedComment": "剧情相关点评",
-      "styleComment": "风格点评（要夸奖）"
+    "styleComment": "发言风格"
     }
   }
 }
@@ -501,27 +531,39 @@ ${gameContext.background}
 最近的聊天记录：
 ${gameContext.recentMessages.map(msg => `${msg.senderName}: ${msg.content}`).join('\n')}
 
-请根据你的性格特点，对这个发言做出1-2句简短的回应。回应要：
-1. 符合你的性格特点（${aiNPC.personality}）
-2. 与游戏剧情相关
-3. 推动剧情发展或引发思考
-4. 语言自然，不要过于正式
-5. 不要暴露你是AI的身份
+请根据你的性格特点，对这个发言做出1-2句简短的回应。必须严格遵守：
+1. 仅使用第一人称“我”，不要出现第三人称描述自己或旁白语气。
+2. 与游戏剧情相关并回应该玩家刚才的话，推动讨论。
+3. 自然口语化，不要过于书面或官话；长度不超过60字。
+4. 不要暴露你是AI，不要复述系统信息或背景。
 
-直接输出回复内容，不要JSON格式：`;
+直接输出文本内容（不要JSON、不要引号、不要前后缀）：`;
 
   try {
     const response = await callLLM(prompt, false);
-    return response.trim();
+    let t = response.trim();
+    // 去引号
+    t = t.replace(/^["“”']+|["“”']+$/g, '');
+    // 保证第一人称
+    if (!t.includes('我')) {
+      t = (t.length <= 58 ? `我觉得${t}` : `我觉得${t.slice(0, 56)}`);
+    }
+  const selfName = aiNPC.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`);
+  const selfNameRegex = new RegExp(selfName + '(?=[，。！!？?、,\s])', 'g');
+  t = t.replace(selfNameRegex, '我');
+  t = t.replace(/我觉得我/g, '我觉得');
+    // 限长
+    if (t.length > 60) t = t.slice(0, 60);
+    return t;
   } catch (error) {
     console.error('Failed to generate NPC response:', error);
     // 返回备用回复
     const fallbackResponses = [
-      "有意思的观点...",
-      "这让我想到了什么...",
-      "确实值得深思。",
-      "或许事情没那么简单。",
-      "继续说说你的想法。"
+      "我觉得这个点有意思。",
+      "我有个想法，先听我说。",
+      "我有点怀疑这里不对劲。",
+      "我更倾向于另一种解释。",
+      "我想再确认一个细节。"
     ];
     return fallbackResponses[Math.floor(Math.random() * fallbackResponses.length)];
   }
