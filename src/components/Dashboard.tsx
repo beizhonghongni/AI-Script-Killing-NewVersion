@@ -326,6 +326,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           isOpen={showImportScript}
           onClose={() => setShowImportScript(false)}
           onSuccess={handleImportSuccess}
+          currentUserId={currentUser?.id}
         />
       )}
 

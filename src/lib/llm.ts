@@ -1,7 +1,24 @@
 import { LLMRequest, LLMResponse, LLMContext, GameRecord, Script, AINPCConfig } from '@/types';
 
-const GEMINI_API_KEY = 'AIzaSyBurtcL5QVBYKi1FmJBIzBa7nlasUvt5To';
-const GEMINI_2_5_PRO_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
+// 动态获取 Gemini Key: 优先 .env，其次运行时设置的内存 key，可用调试端点 POST 设置
+function getGeminiApiKey(): string {
+  const envKey = (process.env.GEMINI_API_KEY || '').replace(/"/g,'').trim();
+  // @ts-ignore
+  const runtimeKey = (globalThis as any).__GEMINI_RUNTIME_KEY || '';
+  const key = envKey || runtimeKey || '';
+  if (!key) {
+    // 仅第一次提示
+    // @ts-ignore
+    if (!(globalThis as any).__GEMINI_KEY_WARNED) {
+      console.warn('[LLM] 未检测到 GEMINI_API_KEY（可在 .env.local 设置，或调用 /api/debug/gemini-set 运行时注入）');
+      // @ts-ignore
+      (globalThis as any).__GEMINI_KEY_WARNED = true;
+    }
+  }
+  return key;
+}
+// Correct model endpoints
+const GEMINI_2_5_PRO_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent';
 const GEMINI_2_0_FLASH_URL = 'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent';
 
 // 开发模式下的模拟响应
@@ -49,6 +66,19 @@ function getMockResponse(prompt: string): string {
           round: 3,
           plot: "第三轮：深入调查。更多的线索被发现，每个人的动机逐渐浮出水面。"
         }
+      ]
+    });
+  } else if (prompt.includes('剧本')) {
+    // 更宽松匹配，确保任何剧本生成指令的降级路径返回可解析 JSON
+    return JSON.stringify({
+      title: '临时剧本',
+      background: '这是在网络不可用或API降级模式下生成的占位背景。',
+      characters: [
+        { id: 'char_1', name: '角色1', identity: '占位身份1', personality: '冷静理性', isMainCharacter: true },
+        { id: 'char_2', name: '角色2', identity: '占位身份2', personality: '活跃好奇', isMainCharacter: true }
+      ],
+      roundContents: [
+        { round: 1, plot: '第一轮占位剧情：玩家将围绕主题展开讨论。', privateClues: { char_1: '线索A', char_2: '线索B' } }
       ]
     });
   } else if (prompt.includes('个人剧本')) {
@@ -112,11 +142,11 @@ export async function callLLM(prompt: string, useProModel = false, retries = 3):
     try {
       console.log(`LLM API调用尝试 ${attempt}/${retries}...`);
       
-      const response = await fetch(url, {
+    const response = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'X-goog-api-key': GEMINI_API_KEY,
+      'X-goog-api-key': getGeminiApiKey(),
         },
         body: JSON.stringify(request),
         // 增加超时时间
@@ -201,7 +231,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 2. ${totalCharacters}个角色（包含姓名、身份、性格特点）
    - 前${playerCount}个角色是重要角色（给真人玩家）
    - 后${aiNPCCount}个角色是次要角色（给AI NPC）
-3. 每轮的剧情发展（每轮必须500-600字，详细描述情节发展、环境细节、人物反应等）
+3. 每轮的剧情发展（每轮必须约1000字，目标900-1100字，详细描述情节发展、环境细节、人物反应、人物心理、伏笔与冲突推进）
 4. 每轮每个角色的私人线索（每个50-80字，要有差异性和关联性）
 
 输出格式必须是严格的JSON格式：
@@ -235,50 +265,80 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 - 后${aiNPCCount}个角色是配角或旁观者（次要角色）
 - 私人线索之间有关联但又各不相同
 - 角色姓名要符合剧情背景
-- **重要：每轮剧情必须达到500-600字，要包含丰富的细节描述、环境渲染、人物情感和情节推进**
+- **重要：每轮剧情必须达到约1000字（900-1100字范围），要包含丰富的环境渲染、人物动作/表情/心理、线索埋设、矛盾冲突与推进**
 `;
+  const raw = await callLLM(prompt, true);
 
-  const response = await callLLM(prompt, true);
-  
-  try {
-    // 清理响应中的markdown代码块标记
-    let cleanedResponse = response.trim();
-    
-    // 移除开头的```json或```
-    if (cleanedResponse.startsWith('```json')) {
-      cleanedResponse = cleanedResponse.slice(7);
-    } else if (cleanedResponse.startsWith('```')) {
-      cleanedResponse = cleanedResponse.slice(3);
+  function tryExtractJSON(text: string): any | null {
+    let t = text.trim();
+    if (t.startsWith('```json')) t = t.slice(7);
+    else if (t.startsWith('```')) t = t.slice(3);
+    if (t.endsWith('```')) t = t.slice(0, -3);
+    t = t.trim();
+    // 尝试截取第一个 { 到最后一个 }
+    const first = t.indexOf('{');
+    const last = t.lastIndexOf('}');
+    if (first !== -1 && last !== -1 && last > first) {
+      const candidate = t.slice(first, last + 1);
+      try { return JSON.parse(candidate); } catch { /* ignore */ }
     }
-    
-    // 移除结尾的```
-    if (cleanedResponse.endsWith('```')) {
-      cleanedResponse = cleanedResponse.slice(0, -3);
-    }
-    
-    // 去除首尾空白字符
-    cleanedResponse = cleanedResponse.trim();
-    
-    console.log('Cleaned LLM response:', cleanedResponse.substring(0, 200) + '...');
-    
-    const scriptData = JSON.parse(cleanedResponse);
-    
-    const script: Script = {
+    try { return JSON.parse(t); } catch { return null; }
+  }
+
+  const primaryData = tryExtractJSON(raw);
+  if (primaryData && primaryData.title && Array.isArray(primaryData.characters) && Array.isArray(primaryData.roundContents)) {
+    return {
       id: `script_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      title: scriptData.title,
-      rounds: rounds,
-      background: scriptData.background,
-      characters: scriptData.characters || [],
-      roundContents: scriptData.roundContents,
+      title: primaryData.title,
+      rounds,
+      background: primaryData.background,
+      characters: primaryData.characters,
+      roundContents: primaryData.roundContents,
       createdAt: Date.now(),
       createdBy: 'system'
     };
-    
-    return script;
-  } catch (error) {
-    console.error('Failed to parse script JSON:', error);
-    throw new Error('Failed to generate valid script');
   }
+
+  console.warn('[generateScript] 主体一次性生成失败，进入增量模式');
+
+  // -------- 增量模式 --------
+  // Step1: 骨架
+  const skeletonPrompt = `请仅输出 JSON，不要任何多余文字：\n{\n  "title": "标题",\n  "background": "250-300字背景",\n  "characters": [ { "id": "char_1", "name": "角色1", "identity": "身份", "personality": "性格", "isMainCharacter": true } ]\n}\n要求：共 ${totalCharacters} 个角色，前 ${playerCount} 主角 isMainCharacter=true，后 ${aiNPCCount} 为配角。剧情主题：${plotRequirement}`;
+  const skeletonRaw = await callLLM(skeletonPrompt, true);
+  const skeleton = tryExtractJSON(skeletonRaw) || {};
+  const characters = Array.isArray(skeleton.characters) && skeleton.characters.length === totalCharacters
+    ? skeleton.characters
+    : Array.from({ length: totalCharacters }).map((_, i) => ({
+        id: `char_${i+1}`,
+        name: `角色${i+1}`,
+        identity: `身份${i+1}`,
+        personality: `性格${i+1}`,
+        isMainCharacter: i < playerCount
+      }));
+
+  // Step2: 每轮内容
+  const roundContents: any[] = [];
+  for (let r = 1; r <= rounds; r++) {
+  const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 1000字剧情(900-1100字, 包含环境描写/人物行为/心理活动/冲突推进/伏笔)",\n "privateClues": { "角色ID": "该角色50-80字线索" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
+    const roundRaw = await callLLM(perRoundPrompt, false);
+    const rd = tryExtractJSON(roundRaw) || {};
+    const clues: any = {};
+    characters.forEach(c => {
+      clues[c.id] = (rd.privateClues && rd.privateClues[c.id]) || `线索：${plotRequirement} 的线索片段 (${c.id})`;
+    });
+    roundContents.push({ round: r, plot: rd.plot || `第${r}轮剧情：${plotRequirement} 发展...`, privateClues: clues });
+  }
+
+  return {
+    id: `script_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+    title: skeleton.title || `临时剧本：${plotRequirement.slice(0,20)}`,
+    rounds,
+    background: skeleton.background || `背景：${plotRequirement} 的故事设定。`,
+    characters,
+    roundContents,
+    createdAt: Date.now(),
+    createdBy: 'incremental'
+  };
 }
 
 // 2. AI NPC发言决策 - 使用2.0 Flash

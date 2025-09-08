@@ -71,6 +71,19 @@ export interface Script {
   background: string;
   characters: Character[]; // 角色列表
   roundContents: RoundContent[];
+  rawImportedText?: string; // 原始导入合并文本（供再次加工或再生成）
+  plotRequirement?: string; // 导入阶段若有
+  // 可选的扩展字段（外部聚合导入生成）
+  finalResolution?: string;
+  mechanics?: string;
+  recommendedPlayerCount?: number; // 推荐真人玩家数量
+  allowNPCFill?: boolean; // 是否允许AI补位
+  npcSuggestion?: {
+    needNPC: boolean;
+    minHumanPlayers: number;
+    maxNPC: number;
+    reason?: string;
+  } | null;
   createdAt: number;
   createdBy: string; // 创建者ID
 }

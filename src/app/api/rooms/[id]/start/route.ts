@@ -69,7 +69,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     let personalScripts: { [characterId: string]: any } = {};
 
     // 检查是否是收藏剧本
-    if ((room as any).collectedScript) {
+  if ((room as any).collectedScript) {
       // 使用收藏剧本
       const collectedScript = (room as any).collectedScript;
       script = {
@@ -80,7 +80,8 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
         characters: collectedScript.characters,
         roundContents: collectedScript.roundContents,
         createdAt: Date.now(),
-        createdBy: 'collected'
+    createdBy: 'collected',
+    rawImportedText: collectedScript.rawImportedText || undefined
       };
 
       // 使用原有的个人剧本
@@ -89,7 +90,7 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
           personalScripts[char.id] = collectedScript.personalScripts[char.id];
         }
       });
-    } else {
+  } else {
       // 生成新剧本
       try {
         console.log('开始生成剧本...');

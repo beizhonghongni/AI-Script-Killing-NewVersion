@@ -4,12 +4,16 @@ interface ImportScriptModalProps {
   isOpen: boolean;
   onClose: () => void;
   onSuccess: () => void;
+  currentUserId?: string;
 }
 
-export default function ImportScriptModal({ isOpen, onClose, onSuccess }: ImportScriptModalProps) {
+export default function ImportScriptModal({ isOpen, onClose, onSuccess, currentUserId }: ImportScriptModalProps) {
   const [files, setFiles] = useState<FileList | null>(null);
   const [isUploading, setIsUploading] = useState(false);
   const [uploadStatus, setUploadStatus] = useState<string>('');
+  const [overridePlayers, setOverridePlayers] = useState<string>('');
+  const [overrideRounds, setOverrideRounds] = useState<string>('');
+  const [appcode, setAppcode] = useState<string>('');
 
   if (!isOpen) return null;
 
@@ -29,14 +33,16 @@ export default function ImportScriptModal({ isOpen, onClose, onSuccess }: Import
 
     try {
       const formData = new FormData();
-      for (let i = 0; i < files.length; i++) {
+  for (let i = 0; i < files.length; i++) {
         formData.append('pdfs', files[i]);
       }
 
-      const response = await fetch('/api/scripts/import-pdf', {
-        method: 'POST',
-        body: formData,
-      });
+  if (currentUserId) formData.append('userId', currentUserId);
+
+  if (overridePlayers) formData.append('recommendedPlayerCount', overridePlayers);
+  if (overrideRounds) formData.append('rounds', overrideRounds);
+  if (appcode) formData.append('appcode', appcode.trim());
+  const response = await fetch('/api/scripts/import-pdf', { method: 'POST', body: formData });
 
       const result = await response.json();
 
@@ -112,12 +118,60 @@ export default function ImportScriptModal({ isOpen, onClose, onSuccess }: Import
             </div>
           )}
 
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">玩家人数(可选覆盖)</label>
+              <input
+                type="number"
+                min={3}
+                max={12}
+                value={overridePlayers}
+                onChange={e => setOverridePlayers(e.target.value)}
+                className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white"
+                placeholder="自动"
+              />
+            </div>
+            <div>
+              <label className="block text-xs text-gray-400 mb-1">轮数(1-25)</label>
+              <input
+                type="number"
+                min={1}
+                max={25}
+                value={overrideRounds}
+                onChange={e => setOverrideRounds(e.target.value)}
+                className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white"
+                placeholder="自动"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-xs text-gray-400 mb-1">临时 AppCode (仅本地调试)</label>
+            <input
+              type="text"
+              value={appcode}
+              onChange={e=>setAppcode(e.target.value)}
+              className="w-full px-2 py-1 bg-gray-700 border border-gray-600 rounded text-sm text-white"
+              placeholder="可留空，优先使用环境变量"
+            />
+          </div>
+
+          <div className="text-xs text-gray-400 leading-relaxed space-y-1">
+            <p>说明：LLM 会自动融合多个PDF为一个剧本，智能决定轮数(1-25)与玩家人数。</p>
+            <p>OCR若环境变量未生效，可在上方填写临时 AppCode 测试（不会保存）。</p>
+            <p>若你的真人好友少于推荐人数，创建房间时可添加 AI NPC 补齐。</p>
+          </div>
+
           {uploadStatus && (
-            <div className={`p-3 rounded-md ${
-              uploadStatus.includes('成功') ? 'bg-green-900 text-green-300' :
-              uploadStatus.includes('失败') ? 'bg-red-900 text-red-300' :
-              'bg-blue-900 text-blue-300'
-            }`}>
+            <div
+              className={`p-3 rounded-md whitespace-pre-wrap text-sm ${
+                uploadStatus.includes('成功')
+                  ? 'bg-green-900 text-green-300'
+                  : uploadStatus.includes('失败')
+                    ? 'bg-red-900 text-red-300'
+                    : 'bg-blue-900 text-blue-300'
+              }`}
+            >
               {uploadStatus}
             </div>
           )}

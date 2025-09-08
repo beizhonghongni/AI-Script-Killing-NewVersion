@@ -63,6 +63,15 @@ export default function RoomPage() {
     fetchRoomData();
   }, [params.id, router]);
 
+  // 若房间是收藏剧本，初始化轮数与剧情要求
+  useEffect(() => {
+    if (room && (room).collectedScript) {
+      const cs = (room).collectedScript;
+      if (cs.rounds && rounds !== String(cs.rounds)) setRounds(String(cs.rounds));
+      if (cs.plotRequirement && !plotRequirement) setPlotRequirement(cs.plotRequirement);
+    }
+  }, [room]);
+
   // 拉取我可用的好友风格（对方授权给我的）
   useEffect(() => {
     const loadFriendStyles = async () => {
@@ -415,7 +424,8 @@ export default function RoomPage() {
   };
 
   const startGame = async () => {
-    if (!plotRequirement.trim()) {
+    // 收藏剧本无需剧情要求
+    if (!room.collectedScript && !plotRequirement.trim()) {
       alert('请输入剧情要求');
       return;
     }
@@ -453,8 +463,8 @@ export default function RoomPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          rounds: roundCount,
-          plotRequirement,
+          rounds: room.collectedScript ? room.collectedScript.rounds : roundCount,
+          plotRequirement: room.collectedScript ? (room.collectedScript.plotRequirement || '外部导入剧本') : plotRequirement,
           aiNPCTypes: aiNPCTypes,
           friendStyleNPCs: selectedFriendStyles // 可能为空
         })
@@ -528,10 +538,16 @@ export default function RoomPage() {
             body: form,
           });
           const data = await res.json();
-          if (!data.success) throw new Error(data.error || '转写失败');
-          setNewMessage((prev) => (prev ? `${prev} ${data.text}` : data.text));
+          if (!data.success) {
+            console.warn('STT failure details:', data);
+            throw new Error(data.error || '转写失败');
+          }
+          if (!data.text) {
+            console.warn('STT returned success but empty text:', data);
+          }
+          setNewMessage((prev) => (prev ? `${prev} ${data.text || ''}` : (data.text || '')));
         } catch (err) {
-          setSttError(err.message || '转写失败');
+          setSttError((err && err.message) ? err.message : '转写失败');
         } finally {
           // stop tracks
           stream.getTracks().forEach(t => t.stop());
@@ -937,6 +953,7 @@ export default function RoomPage() {
                 >
                   {sttOn ? '已说完' : '语音'}
                 </button>
+                {/* 临时Key输入已移除（改为配置 .env.local） */}
                 <input
                   type="text"
                   value={newMessage}
@@ -1816,7 +1833,7 @@ export default function RoomPage() {
                     {/* 开始游戏按钮 */}
                     <button
                       onClick={startGame}
-                      disabled={!plotRequirement.trim() || parseInt(rounds) < 1 || startingGame}
+                      disabled={startingGame || (!room.collectedScript && (!plotRequirement.trim() || parseInt(rounds) < 1))}
                       className="w-full px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 disabled:from-gray-600 disabled:to-gray-600 text-white font-bold rounded-lg transition-all disabled:cursor-not-allowed flex items-center justify-center"
                     >
                       {startingGame ? (
