@@ -44,11 +44,39 @@ function getMockResponse(prompt: string): string {
     isMainCharacter: i < playerCount
   }));
   const background = `【背景】本剧本主题：${theme}。玩家被卷入一场逐步揭开的事件中。请围绕主题进行推理，隐藏动机、冲突与伏笔会在后续轮次逐步浮现。`;
-  const roundContents = Array.from({length: rounds}).map((_,i)=>({
-    round: i+1,
-    plot: `第${i+1}轮（占位 300字紧凑剧情）围绕“${theme}”推进：制造新的冲突或揭示一条线索；展示1-2个角色的反应与心理；留下一个未解疑点，引导下一轮。`,
-    privateClues: Object.fromEntries(chars.map(c=>[c.id,`线索${i+1}-${c.id}：与“${theme}”相关的个性化提示`]))
-  }));
+
+  // 生成接近1000字的占位剧情（在服务端降级时提升体验）
+  function buildRoundPlot(roundIndex: number): string {
+    const baseSegments = [
+      `【场景切入】时间推进到新的节点，环境细节被进一步描摹：空气里残留的气味、窗外的光线变化与细微噪声共同营造出紧张的氛围。`,
+      `【事件推进】与“${theme}”核心冲突相关的一个关键现象出现，引发所有角色短暂沉默；有人试探性提出假设，有人否认，有人刻意回避。`,
+      `【人物交锋】两名主要角色围绕线索真伪展开针锋相对的追问，措辞保持克制却暗含火药味；一名配角突然插入补充旁观视角，使推理分支被迫拆解重组。`,
+      `【线索揭示】新的线索被曝光：它表面指向显而易见的方向，但细节层面存在自相矛盾；角色们各自挑选符合自身立场的碎片进行拼接，形成多条暂时并存的解释路径。`,
+      `【心理与伏笔】一位角色在短暂沉默后给出貌似配合的回应，却在措辞中留下不自然的修饰；另一位角色表情或语气的细节被敏锐者记录下，成为下一轮潜在爆点。`,
+      `【未解悬念】本轮末尾出现一个无法立即验证的小型反常现象：它既可能是他人布置的障眼物，也可能是更深层结构的接口，迫使所有人改变原先的推理优先级。`
+    ];
+    // 根据轮次稍作差异
+    if (roundIndex === 0) baseSegments.unshift(`【轮次引导】第${roundIndex+1}轮正式开始，角色们在初步交换认知后进入更具针对性的排查阶段，仍存在对主题“${theme}”本质误读的空间。`);
+    if (roundIndex === rounds - 1) baseSegments.push(`【逼近真相】随着前序矛盾被压缩，隐藏结构轮廓逐渐清晰，然而仍有一处核心动机缺口无人能自洽填补，为最终揭示蓄势。`);
+
+    let text = `第${roundIndex+1}轮剧情展开：` + baseSegments.join('');
+    // 字数（中文字符）不足则填充分析性补述
+    const targetMin = 900; // 允许 900 - 1100 区间
+    const filler = `【细节补述】角色之间的呼吸节奏、语速变化与视线停顿都被记录进集体记忆；这些微妙标记将在后续被重新比对，构成推翻或巩固某条推理链的证据。`;
+    while ([...text].length < targetMin) {
+      text += filler;
+      if ([...text].length > 1120) break; // 上限保护
+    }
+    return text;
+  }
+
+  const roundContents = Array.from({length: rounds}).map((_,i)=>{
+    return {
+      round: i+1,
+      plot: buildRoundPlot(i),
+      privateClues: Object.fromEntries(chars.map(c=>[c.id,`线索${i+1}-${c.id}：与“${theme}”相关的个性化提示，暗示其立场或潜在误导点。`]))
+    };
+  });
 
   if (prompt.includes('生成剧本') || prompt.includes('剧本')) {
     return JSON.stringify({
@@ -237,7 +265,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 2. ${totalCharacters}个角色（包含姓名、身份、性格特点）
    - 前${playerCount}个角色是重要角色（给真人玩家）
    - 后${aiNPCCount}个角色是次要角色（给AI NPC）
-3. 每轮的剧情发展（每轮约300字，目标280-320字，包含关键情节推进、核心冲突、必要的环境/人物/伏笔要素，保持紧凑）
+3. 每轮的剧情发展（每轮约1000字左右，建议控制在900-1100字；需包含关键情节推进、核心冲突、必要的环境/人物/伏笔要素，信息密度高且节奏紧凑）
 4. 每轮每个角色的私人线索（每个50-80字，要有差异性和关联性）
 
 输出格式必须是严格的JSON格式：
@@ -271,7 +299,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 - 后${aiNPCCount}个角色是配角或旁观者（次要角色）
 - 私人线索之间有关联但又各不相同
 - 角色姓名要符合剧情背景
-- **重要：每轮剧情控制在约300字（280-320字范围），保持信息密度与推进节奏，避免冗长展开**
+- **重要：每轮剧情控制在约1000字（900-1100字之间），保持信息密度与推进节奏，避免冗长堆砌或无效对白**
 `;
   const raw = await callLLM(prompt, true);
 
@@ -325,7 +353,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
   // Step2: 每轮内容
   const roundContents: any[] = [];
   for (let r = 1; r <= rounds; r++) {
-  const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 300字剧情(280-320字, 紧凑推进: 事件进展/人物反应/冲突或伏笔1处)",\n "privateClues": { "角色ID": "该角色50-80字线索" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
+  const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 1000字剧情(目标900-1100字; 包含事件进展/角色心理/冲突或伏笔1-2处; 需自然连贯)",\n "privateClues": { "角色ID": "该角色50-80字线索" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
     const roundRaw = await callLLM(perRoundPrompt, false);
     const rd = tryExtractJSON(roundRaw) || {};
     const clues: any = {};
