@@ -26,93 +26,50 @@ const ENABLE_MOCK_MODE = false;
 
 // 模拟LLM响应函数
 function getMockResponse(prompt: string): string {
-  if (prompt.includes('生成剧本')) {
+  // 智能提取剧情主题与轮数
+  const themeMatch = /剧情要求[:：]\s*([^\n]+)|剧情主题[:：]\s*([^\n]+)/.exec(prompt);
+  const theme = (themeMatch && (themeMatch[1] || themeMatch[2]))?.trim().slice(0,60) || '临时主题';
+  const roundsMatch = /游戏轮数[:：]\s*(\d+)|总轮数[:：]\s*(\d+)/.exec(prompt);
+  const rounds = roundsMatch ? parseInt(roundsMatch[1] || roundsMatch[2], 10) : 3;
+  const playersMatch = /真人玩家数量[:：]\s*(\d+)/.exec(prompt);
+  const aiMatch = /AI NPC数量[:：]\s*(\d+)/.exec(prompt);
+  const playerCount = playersMatch ? parseInt(playersMatch[1],10) : 2;
+  const aiCount = aiMatch ? parseInt(aiMatch[1],10) : 1;
+  const total = playerCount + aiCount;
+  const chars = Array.from({length: total}).map((_,i)=>({
+    id: `char_${i+1}`,
+    name: `角色${i+1}`,
+    identity: i < playerCount ? `核心身份${i+1}` : `配角身份${i+1}`,
+    personality: i < playerCount ? '积极推理' : '观察谨慎',
+    isMainCharacter: i < playerCount
+  }));
+  const background = `【背景】本剧本主题：${theme}。玩家被卷入一场逐步揭开的事件中。请围绕主题进行推理，隐藏动机、冲突与伏笔会在后续轮次逐步浮现。`;
+  const roundContents = Array.from({length: rounds}).map((_,i)=>({
+    round: i+1,
+    plot: `第${i+1}轮（占位 300字紧凑剧情）围绕“${theme}”推进：制造新的冲突或揭示一条线索；展示1-2个角色的反应与心理；留下一个未解疑点，引导下一轮。`,
+    privateClues: Object.fromEntries(chars.map(c=>[c.id,`线索${i+1}-${c.id}：与“${theme}”相关的个性化提示`]))
+  }));
+
+  if (prompt.includes('生成剧本') || prompt.includes('剧本')) {
     return JSON.stringify({
-      title: "神秘的古堡谜案",
-      background: "在一个暴风雨的夜晚，几位客人被邀请到古老的维多利亚庄园过夜。然而，当第二天早晨到来时，庄园的主人却离奇死亡。每个人都有动机，每个人都有秘密。真相究竟是什么？",
-      characters: [
-        {
-          id: "char_001",
-          name: "爱丽丝·维多利亚",
-          identity: "庄园继承人",
-          personality: "优雅但隐藏着不为人知的秘密",
-          isMainCharacter: true
-        },
-        {
-          id: "char_002", 
-          name: "詹姆斯·布朗",
-          identity: "律师",
-          personality: "严谨理性，擅长分析",
-          isMainCharacter: true
-        },
-        {
-          id: "char_003",
-          name: "莎拉·琼斯",
-          identity: "管家",
-          personality: "忠诚但神秘莫测",
-          isMainCharacter: false
-        }
-      ],
-      roundContents: [
-        {
-          round: 1,
-          plot: "第一轮：发现尸体。庄园主人被发现死在书房中，现场一片狼藉。"
-        },
-        {
-          round: 2,
-          plot: "第二轮：初步调查。警察到达现场，开始询问各位客人的不在场证明。"
-        },
-        {
-          round: 3,
-          plot: "第三轮：深入调查。更多的线索被发现，每个人的动机逐渐浮出水面。"
-        }
-      ]
-    });
-  } else if (prompt.includes('剧本')) {
-    // 更宽松匹配，确保任何剧本生成指令的降级路径返回可解析 JSON
-    return JSON.stringify({
-      title: '临时剧本',
-      background: '这是在网络不可用或API降级模式下生成的占位背景。',
-      characters: [
-        { id: 'char_1', name: '角色1', identity: '占位身份1', personality: '冷静理性', isMainCharacter: true },
-        { id: 'char_2', name: '角色2', identity: '占位身份2', personality: '活跃好奇', isMainCharacter: true }
-      ],
-      roundContents: [
-        { round: 1, plot: '第一轮占位剧情：玩家将围绕主题展开讨论。', privateClues: { char_1: '线索A', char_2: '线索B' } }
-      ]
+      title: `${theme}·推理剧本`,
+      background,
+      characters: chars,
+      roundContents
     });
   } else if (prompt.includes('个人剧本')) {
     return JSON.stringify({
-      personalBackground: "你是这个故事中的关键人物，有着不为人知的秘密。",
+      personalBackground: `你与“${theme}”事件存在隐秘关联，这段个人背景用于帮助你制定推理策略。`,
       personalRoundContents: [
-        {
-          round: 1,
-          personalPlot: "你发现了尸体，心中充满了恐惧和疑虑。",
-          hiddenInfo: "你知道一些其他人不知道的秘密..."
-        }
+        { round: 1, personalPlot: `个人视角：第一轮中你注意到他人忽视的细节，涉及“${theme}”的隐藏线索。`, hiddenInfo: '你掌握的隐藏动机碎片。' }
       ]
     });
   } else if (prompt.includes('AI角色是否要说话')) {
-    return Math.random() > 0.7 ? "是" : "否";
-  } else if (prompt.includes('AI角色发言')) {
-    const responses = [
-      "我觉得这件事很可疑...",
-      "让我们仔细分析一下线索",
-      "这个说法有矛盾之处",
-      "我想起了一个重要的细节"
-    ];
-    return responses[Math.floor(Math.random() * responses.length)];
-  } else if (prompt.includes('故事复盘') || prompt.includes('回忆这次游戏')) {
-    return "这是一次精彩的剧本杀体验！在这个神秘的故事中，我们一起探索了人性的复杂与真相的曲折。每个角色都有自己的秘密，每个线索都指向不同的方向。通过层层推理和激烈讨论，我们最终揭开了事件的真相。这个故事让我们看到了在关键时刻，人性的选择往往决定了命运的走向。整个游戏过程充满了悬疑和惊喜，每一次的发言都可能改变我们对真相的认知。";
-  } else if (prompt.includes('精彩点解密') || prompt.includes('精彩的推理')) {
-    return "游戏中最精彩的时刻是当关键线索被发现的那一瞬间，所有人的表情都发生了微妙的变化。每个玩家的推理都展现了独特的逻辑思维，特别是在分析证据时的严谨态度令人印象深刻。AI角色的参与为游戏增添了更多的不确定性，它们的发言往往在关键时刻提供了重要的线索或者制造了有趣的误导。整个讨论过程中，玩家们的互动自然流畅，展现了良好的游戏素养。";
-  } else if (prompt.includes('故事升华') || prompt.includes('深层含义')) {
-    return "这个故事让我们思考了人性中善与恶的界限。在复杂的人际关系中，每个人都有自己的立场和难处。真相往往比表面看起来更加复杂，正如生活中的许多选择一样，没有绝对的对错。这次游戏体验提醒我们要用包容的心态去理解他人，同时也要保持独立思考的能力。";
-  } else if (prompt.includes('观点总结') || prompt.includes('剧情贡献') || prompt.includes('发言风格')) {
-    return "观点总结: 该玩家在游戏中展现了敏锐的观察力和逻辑推理能力，能够抓住关键线索进行深入分析。\n剧情贡献: 通过积极的参与和精彩的发言，为游戏的推进和氛围营造做出了重要贡献。\n发言风格: 发言条理清晰，语言生动有趣，既能保持游戏的紧张感又不失幽默风趣。";
-  } else {
-    return "这是一个模拟响应，用于开发测试。";
+    return JSON.stringify({ shouldSpeak: true, content: '我觉得这里的矛盾点还没解释清楚。' });
   }
+
+  // 其他通用占位
+  return '这是一个模拟响应，用于开发测试。';
 }
 
 // 通用LLM调用函数，带有重试机制
@@ -124,7 +81,7 @@ export async function callLLM(prompt: string, useProModel = false, retries = 3):
     return getMockResponse(prompt);
   }
   
-  const url = useProModel ? GEMINI_2_5_PRO_URL : GEMINI_2_0_FLASH_URL;
+  const primaryUrl = useProModel ? GEMINI_2_5_PRO_URL : GEMINI_2_0_FLASH_URL;
   
   const request: LLMRequest = {
     contents: [
@@ -142,7 +99,7 @@ export async function callLLM(prompt: string, useProModel = false, retries = 3):
     try {
       console.log(`LLM API调用尝试 ${attempt}/${retries}...`);
       
-    const response = await fetch(url, {
+    let response = await fetch(primaryUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -156,6 +113,33 @@ export async function callLLM(prompt: string, useProModel = false, retries = 3):
       if (!response.ok) {
         const errorText = await response.text();
         console.error(`LLM API错误 (尝试 ${attempt}): ${response.status} ${response.statusText}`, errorText);
+
+        // 如果是 503 / 502 / 504 并且当前使用的是 Pro 模型，则立即尝试降级到 Flash 模型一次（同一 attempt 内）
+        if (useProModel && (response.status === 503 || response.status === 502 || response.status === 504)) {
+          console.log('Pro 模型过载，尝试降级到 Flash 模型...');
+          try {
+            response = await fetch(GEMINI_2_0_FLASH_URL, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'X-goog-api-key': getGeminiApiKey(),
+              },
+              body: JSON.stringify(request),
+              signal: AbortSignal.timeout(45000)
+            });
+            if (response.ok) {
+              const data: LLMResponse = await response.json();
+              if (data.candidates?.length) {
+                console.log(`降级到 Flash 成功 (尝试 ${attempt})`);
+                return data.candidates[0].content.parts[0].text;
+              }
+            } else {
+              console.warn('降级到 Flash 仍失败:', response.status, response.statusText);
+            }
+          } catch (downgradeErr) {
+            console.warn('降级调用异常:', downgradeErr);
+          }
+        }
         
         // 如果是服务器错误（5xx）且还有重试次数，则继续重试
         if (response.status >= 500 && attempt < retries) {
@@ -209,6 +193,28 @@ export async function callLLM(prompt: string, useProModel = false, retries = 3):
   return getMockResponse(prompt);
 }
 
+// 通用宽松 JSON 提取（去除 markdown 包裹、截取第一个 { 到最后一个 }、清理 BOM / 多余前缀）
+function extractJSONFlexible(raw: string): any | null {
+  if (!raw) return null;
+  let t = raw.trim();
+  // 去掉可能的中文前言，找到第一个 '{'
+  const firstBrace = t.indexOf('{');
+  if (firstBrace > 0) {
+    t = t.slice(firstBrace);
+  }
+  if (t.startsWith('```json')) t = t.slice(7);
+  else if (t.startsWith('```')) t = t.slice(3);
+  if (t.endsWith('```')) t = t.slice(0, -3);
+  t = t.replace(/^[\uFEFF\s]+/, '').trim();
+  const first = t.indexOf('{');
+  const last = t.lastIndexOf('}');
+  if (first !== -1 && last !== -1 && last > first) {
+    const candidate = t.slice(first, last + 1);
+    try { return JSON.parse(candidate); } catch { /* ignore */ }
+  }
+  try { return JSON.parse(t); } catch { return null; }
+}
+
 // 1. 生成剧本 - 使用2.5 Pro
 export async function generateScript(
   plotRequirement: string, 
@@ -231,7 +237,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 2. ${totalCharacters}个角色（包含姓名、身份、性格特点）
    - 前${playerCount}个角色是重要角色（给真人玩家）
    - 后${aiNPCCount}个角色是次要角色（给AI NPC）
-3. 每轮的剧情发展（每轮必须约1000字，目标900-1100字，详细描述情节发展、环境细节、人物反应、人物心理、伏笔与冲突推进）
+3. 每轮的剧情发展（每轮约300字，目标280-320字，包含关键情节推进、核心冲突、必要的环境/人物/伏笔要素，保持紧凑）
 4. 每轮每个角色的私人线索（每个50-80字，要有差异性和关联性）
 
 输出格式必须是严格的JSON格式：
@@ -265,7 +271,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 - 后${aiNPCCount}个角色是配角或旁观者（次要角色）
 - 私人线索之间有关联但又各不相同
 - 角色姓名要符合剧情背景
-- **重要：每轮剧情必须达到约1000字（900-1100字范围），要包含丰富的环境渲染、人物动作/表情/心理、线索埋设、矛盾冲突与推进**
+- **重要：每轮剧情控制在约300字（280-320字范围），保持信息密度与推进节奏，避免冗长展开**
 `;
   const raw = await callLLM(prompt, true);
 
@@ -319,7 +325,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
   // Step2: 每轮内容
   const roundContents: any[] = [];
   for (let r = 1; r <= rounds; r++) {
-  const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 1000字剧情(900-1100字, 包含环境描写/人物行为/心理活动/冲突推进/伏笔)",\n "privateClues": { "角色ID": "该角色50-80字线索" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
+  const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 300字剧情(280-320字, 紧凑推进: 事件进展/人物反应/冲突或伏笔1处)",\n "privateClues": { "角色ID": "该角色50-80字线索" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
     const roundRaw = await callLLM(perRoundPrompt, false);
     const rd = tryExtractJSON(roundRaw) || {};
     const clues: any = {};
@@ -698,32 +704,36 @@ ${baseScript.roundContents.map(rc => `第${rc.round}轮：${rc.plot}`).join('\n'
 `;
 
   try {
-    const response = await callLLM(prompt, true);
-    
-    // 清理响应
-    let cleanedResponse = response.trim();
-    if (cleanedResponse.startsWith('```json')) {
-      cleanedResponse = cleanedResponse.slice(7);
-    } else if (cleanedResponse.startsWith('```')) {
-      cleanedResponse = cleanedResponse.slice(3);
+    const response = await callLLM(prompt, true); // 优先 Pro
+    let parsed = extractJSONFlexible(response);
+
+    // 如果第一次解析失败，尝试再提示模型只输出 JSON（闪回重试一次，使用较小模型）
+    if (!parsed) {
+      console.warn('[generatePersonalScript] 初次解析失败，尝试二次约束 JSON');
+      const enforcePrompt = `只输出严格 JSON，不要额外说明：\n${prompt}\n\n（再次提醒：只输出 JSON）`;
+      const secondRaw = await callLLM(enforcePrompt, false); // 用 flash 降低过载概率
+      parsed = extractJSONFlexible(secondRaw);
     }
-    if (cleanedResponse.endsWith('```')) {
-      cleanedResponse = cleanedResponse.slice(0, -3);
+
+    if (parsed && parsed.personalBackground && Array.isArray(parsed.personalRoundContents)) {
+      // 结构与长度修正：确保每轮字段完整
+      parsed.personalRoundContents = parsed.personalRoundContents.map((r: any, idx: number) => ({
+        round: r.round || (idx + 1),
+        personalPlot: r.personalPlot || r.plot || `第${idx + 1}轮：${baseScript.roundContents[idx]?.plot || '剧情待补充'}`,
+        hiddenInfo: r.hiddenInfo || r.secret || '你掌握着一些暂时不便透露的线索'
+      }));
+      return parsed;
     }
-    cleanedResponse = cleanedResponse.trim();
-    
-    const personalScript = JSON.parse(cleanedResponse);
-    return personalScript;
+    throw new Error('Parsed result missing required fields');
   } catch (error) {
     console.error('Failed to generate personal script:', error);
-    
-    // 返回默认的个人剧本
+    // 返回可用的降级版本
     return {
-      personalBackground: `作为${character.name}，你发现自己卷入了这个复杂的事件中。${baseScript.background}`,
+      personalBackground: `作为${character.name}，你发现自己卷入了事件。${baseScript.background}`,
       personalRoundContents: baseScript.roundContents.map(rc => ({
         round: rc.round,
-        personalPlot: `第${rc.round}轮：${rc.plot}`,
-        hiddenInfo: "你有一些其他人不知道的信息..."
+        personalPlot: `【个人视角】第${rc.round}轮：${rc.plot}`,
+        hiddenInfo: '暂无额外隐藏信息'
       }))
     };
   }
