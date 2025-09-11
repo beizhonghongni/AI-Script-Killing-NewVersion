@@ -7,6 +7,9 @@ import ChatModal from './ChatModal';
 import RoomsList from './RoomsList';
 import CreateRoomModal from './CreateRoomModal';
 import ImportScriptModal from './ImportScriptModal';
+import ScriptStore from './ScriptStore';
+import ScriptRemixModal from './ScriptRemixModal';
+import RatingStars from './RatingStars';
 import TestImportModal from './TestImportModal';
 
 interface DashboardProps {
@@ -24,6 +27,24 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [selectedCollectedScript, setSelectedCollectedScript] = useState<any>(null);
   const [currentUser, setCurrentUser] = useState<User>(user);
   const [chatFriend, setChatFriend] = useState<any>(null);
+  const [showStore, setShowStore] = useState(false);
+  const [remixScriptId, setRemixScriptId] = useState<string | null>(null);
+  const [ratingSubmitting, setRatingSubmitting] = useState<string | null>(null);
+
+  const rateOriginal = async (script: any) => {
+    const ratingStr = prompt('请输入评分(0-5整数)：');
+    if (ratingStr === null) return;
+    const r = parseInt(ratingStr,10);
+    if (Number.isNaN(r) || r < 0 || r > 5) { alert('无效评分'); return; }
+    setRatingSubmitting(script.originalScriptId || script.id);
+    try {
+      const targetId = script.originalScriptId || script.id;
+      const res = await fetch(`/api/scripts/${targetId}/rating`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, rating: r }) });
+      const data = await res.json();
+      if (!data.success) alert(data.error || '评分失败'); else alert('评分成功');
+    } catch { alert('网络错误'); }
+    setRatingSubmitting(null);
+  };
 
   useEffect(() => {
     // 确保立即获取最新的用户数据
@@ -274,6 +295,18 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                           <p className="text-gray-500 text-xs mt-1 line-clamp-2">
                             {script.background}
                           </p>
+                          <div className="mt-2 flex items-center gap-2 flex-wrap">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); setRemixScriptId(script.originalScriptId || script.id); }}
+                              className="text-xs px-2 py-1 bg-purple-600/40 hover:bg-purple-600/60 text-purple-200 rounded"
+                            >二次创作</button>
+                            <button
+                              type="button"
+                              onClick={(e)=> { e.stopPropagation(); rateOriginal(script); }}
+                              className="text-xs px-2 py-1 bg-yellow-600/40 hover:bg-yellow-600/60 text-yellow-200 rounded"
+                            >评分</button>
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -303,6 +336,9 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
               <div className="flex-1 overflow-y-auto">
                 <RoomsList rooms={rooms} currentUser={user} />
               </div>
+            </div>
+            <div className="mt-6 h-80">
+              <ScriptStore currentUser={currentUser} />
             </div>
           </div>
         </div>
@@ -344,6 +380,14 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           friend={chatFriend}
           onClose={()=> setChatFriend(null)}
           collectedScripts={currentUser?.collectedScripts || []}
+        />
+      )}
+      {remixScriptId && (
+        <ScriptRemixModal
+          scriptId={remixScriptId}
+          onClose={()=> setRemixScriptId(null)}
+          currentUser={currentUser}
+          onRemixCompleted={(newScript)=> { /* 生成后刷新脚本列表? 暂留 */}}
         />
       )}
     </div>
