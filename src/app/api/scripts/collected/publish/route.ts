@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getUserById, getScripts, saveScripts, getScriptById } from '@/lib/storage';
+import { getUserById, getScripts, saveScripts, getUsers } from '@/lib/storage';
 
 // POST /api/scripts/collected/publish
 // body: { userId: string, collectedScriptId: string, price: number }
@@ -20,28 +20,42 @@ export async function POST(req: NextRequest) {
 
 		const user = getUserById(userId);
 		if (!user) return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
-		const collected = user.collectedScripts?.find(cs => cs.id === collectedScriptId);
-		if (!collected) return NextResponse.json({ success: false, error: '该剧本不在用户收藏中' }, { status: 404 });
+			const collected = user.collectedScripts?.find(cs => cs.id === collectedScriptId);
+			if (!collected) return NextResponse.json({ success: false, error: '该剧本不在用户收藏中' }, { status: 404 });
 
-		// 在全局脚本库中找到对应脚本
-		const scripts = getScripts();
-		const idx = scripts.findIndex(s => s.id === collectedScriptId);
-		if (idx === -1) {
-			return NextResponse.json({ success: false, error: '全局脚本不存在，无法上架' }, { status: 404 });
-		}
-		const script = scripts[idx];
+			const scripts = getScripts();
+			// 可能：collected.id 不是真实脚本ID（收藏时使用了独立ID），需要 originalScriptId
+			let scriptIndex = scripts.findIndex(s => s.id === collectedScriptId);
+			if (scriptIndex === -1 && collected.originalScriptId) {
+				scriptIndex = scripts.findIndex(s => s.id === collected.originalScriptId);
+			}
+			if (scriptIndex === -1) {
+				return NextResponse.json({ success: false, error: '全局脚本不存在（可能已被删除），无法上架' }, { status: 404 });
+			}
+			const script = scripts[scriptIndex];
 
-		// 校验原创：必须无 derivativeOfScriptId 且 createdBy === userId
-		if (script.createdBy !== userId || script.derivativeOfScriptId) {
-			return NextResponse.json({ success: false, error: '仅可上架本人原创剧本（非二次创作）' }, { status: 403 });
-		}
+			// 如果脚本是系统生成的且尚未标记原始作者，可在首次上架时“认领作者”
+			const systemCreators = new Set(['system','fallback','incremental','collected']);
+			if (!script.derivativeOfScriptId && systemCreators.has(script.createdBy) && !script.originalAuthorId) {
+				script.createdBy = userId;
+				script.originalAuthorId = userId;
+				script.rootOriginalScriptId = script.rootOriginalScriptId || script.id;
+			}
 
-		script.isListedForSale = true;
-		script.price = price;
-		scripts[idx] = script;
-		saveScripts(scripts);
+			// 校验原创：必须无 derivativeOfScriptId 且 createdBy === userId（或 originalAuthorId === userId）
+			if (script.derivativeOfScriptId) {
+				return NextResponse.json({ success: false, error: '二次创作剧本不能直接上架，请上架最初原创版本' }, { status: 403 });
+			}
+			if (script.createdBy !== userId) {
+				return NextResponse.json({ success: false, error: '只有原创作者可以上架该剧本' }, { status: 403 });
+			}
 
-		return NextResponse.json({ success: true, script });
+			script.isListedForSale = true;
+			script.price = price;
+			scripts[scriptIndex] = script;
+			saveScripts(scripts);
+
+			return NextResponse.json({ success: true, script, claimed: systemCreators.has(script.createdBy) });
 	} catch (e) {
 		console.error('收藏剧本上架失败', e);
 		return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
