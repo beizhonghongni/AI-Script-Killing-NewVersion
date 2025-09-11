@@ -309,6 +309,25 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                               onClick={(e)=> { e.stopPropagation(); rateOriginal(script); }}
                               className="text-xs px-2 py-1 bg-yellow-600/40 hover:bg-yellow-600/60 text-yellow-200 rounded"
                             >评分</button>
+                            {!script.derivativeOfScriptId && (
+                              <button
+                                type="button"
+                                onClick={async (e) => {
+                                  e.stopPropagation();
+                                  const priceStr = prompt('请输入上架价格(>=0整数):','10');
+                                  if (priceStr === null) return;
+                                  const p = parseInt(priceStr,10);
+                                  if (Number.isNaN(p) || p < 0) { alert('价格无效'); return; }
+                                  try {
+                                    const res = await fetch('/api/scripts/collected/publish', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, collectedScriptId: script.id, price: p }) });
+                                    const data = await res.json();
+                                    if (data.success) { alert('上架成功'); }
+                                    else alert(data.error || '上架失败');
+                                  } catch { alert('网络错误'); }
+                                }}
+                                className="text-xs px-2 py-1 bg-green-600/40 hover:bg-green-600/60 text-green-200 rounded"
+                              >上架</button>
+                            )}
                           </div>
                         </div>
                       ))}
