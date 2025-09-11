@@ -17,6 +17,19 @@ export async function GET(request: NextRequest) {
       }
       return s;
     });
+
+    // 若请求在售列表，则按评分排序（平均分降序 -> 评分次数降序 -> 创建时间降序）
+    if (listed === '1') {
+      scripts.sort((a,b) => {
+        const aAvg = a.averageRating ?? 0;
+        const bAvg = b.averageRating ?? 0;
+        if (bAvg !== aAvg) return bAvg - aAvg;
+        const aCount = a.ratingCount ?? 0;
+        const bCount = b.ratingCount ?? 0;
+        if (bCount !== aCount) return bCount - aCount;
+        return (b.createdAt || 0) - (a.createdAt || 0);
+      });
+    }
     
     return NextResponse.json({
       success: true,

@@ -32,8 +32,31 @@ export async function POST(
     author.balance = (author.balance || 0) + price;
     buyer.purchasedScripts = buyer.purchasedScripts || [];
     if (!buyer.purchasedScripts.includes(scriptId)) buyer.purchasedScripts.push(scriptId);
+
+    // 若尚未加入收藏列表，则自动收藏一份快照，便于直接在“收藏剧本”中开局
+    buyer.collectedScripts = buyer.collectedScripts || [];
+    const alreadyCollected = buyer.collectedScripts.some(cs => cs.originalScriptId === script.id || cs.id === script.id);
+    if (!alreadyCollected) {
+      buyer.collectedScripts.push({
+        id: `collected_${Date.now()}_${buyer.id}`,
+        originalScriptId: script.id,
+        originalGameId: 'purchase_direct',
+        title: script.title,
+        rounds: script.rounds,
+        background: script.background,
+        characters: script.characters,
+        roundContents: script.roundContents,
+        plotRequirement: script.plotRequirement || '',
+        personalScripts: {},
+        collectedAt: Date.now(),
+        collectedBy: buyer.id,
+        rootOriginalScriptId: script.rootOriginalScriptId || script.id,
+        originalAuthorId: script.originalAuthorId || script.createdBy,
+        derivativeOfScriptId: script.derivativeOfScriptId,
+      } as any);
+    }
     saveUsers(users);
-    return NextResponse.json({ success: true, balance: buyer.balance });
+    return NextResponse.json({ success: true, balance: buyer.balance, autoCollected: !alreadyCollected });
   } catch (e) {
     console.error('购买失败', e);
     return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });

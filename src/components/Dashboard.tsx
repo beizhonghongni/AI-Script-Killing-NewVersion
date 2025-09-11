@@ -10,6 +10,7 @@ import ImportScriptModal from './ImportScriptModal';
 import ScriptStore from './ScriptStore';
 import ScriptRemixModal from './ScriptRemixModal';
 import RatingStars from './RatingStars';
+import RateScriptModal from './RateScriptModal';
 import TestImportModal from './TestImportModal';
 
 interface DashboardProps {
@@ -32,20 +33,10 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [remixCollectedId, setRemixCollectedId] = useState<string | null>(null);
   const [ratingSubmitting, setRatingSubmitting] = useState<string | null>(null);
 
-  const rateOriginal = async (script: any) => {
-    const ratingStr = prompt('请输入评分(0-5整数)：');
-    if (ratingStr === null) return;
-    const r = parseInt(ratingStr,10);
-    if (Number.isNaN(r) || r < 0 || r > 5) { alert('无效评分'); return; }
-    setRatingSubmitting(script.originalScriptId || script.id);
-    try {
-      const targetId = script.originalScriptId || script.id;
-      const res = await fetch(`/api/scripts/${targetId}/rating`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, rating: r }) });
-      const data = await res.json();
-      if (!data.success) alert(data.error || '评分失败'); else alert('评分成功');
-    } catch { alert('网络错误'); }
-    setRatingSubmitting(null);
-  };
+  const [rateModalOpen, setRateModalOpen] = useState(false);
+  const [rateTarget, setRateTarget] = useState<any>(null);
+  const openRate = (script:any) => { setRateTarget(script); setRateModalOpen(true); };
+  const handleRated = () => { setRateModalOpen(false); setRateTarget(null); };
 
   useEffect(() => {
     // 确保立即获取最新的用户数据
@@ -306,7 +297,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                             >二次创作</button>
                             <button
                               type="button"
-                              onClick={(e)=> { e.stopPropagation(); rateOriginal(script); }}
+                              onClick={(e)=> { e.stopPropagation(); openRate(script); }}
                               className="text-xs px-2 py-1 bg-yellow-600/40 hover:bg-yellow-600/60 text-yellow-200 rounded"
                             >评分</button>
                             {!script.derivativeOfScriptId && (
@@ -417,6 +408,14 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
       onRemixCompleted={(newScript)=> { window.dispatchEvent(new Event('userDataUpdated')); setRemixCollectedId(null); }}
         />
       )}
+    <RateScriptModal
+      open={rateModalOpen}
+      onClose={()=>{ setRateModalOpen(false); setRateTarget(null); }}
+      scriptId={rateTarget? (rateTarget.originalScriptId || rateTarget.id): ''}
+      displayTitle={rateTarget?.title || ''}
+      userId={currentUser.id}
+      onRated={handleRated}
+    />
     </div>
   );
 }

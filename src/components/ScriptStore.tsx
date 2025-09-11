@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from 'react';
 import RatingStars from './RatingStars';
+import PurchaseScriptModal from './PurchaseScriptModal';
 
 export default function ScriptStore({ currentUser }: { currentUser: any }) {
   const [scripts, setScripts] = useState<any[]>([]);
@@ -28,16 +29,10 @@ export default function ScriptStore({ currentUser }: { currentUser: any }) {
     fetchProfile();
   },[currentUser?.id]);
 
-  const purchase = async (scriptId: string) => {
-    if (!currentUser?.id) return;
-    const ok = confirm('确认购买该剧本并扣款？');
-    if (!ok) return;
-    try {
-      const res = await fetch(`/api/scripts/${scriptId}/purchase`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ buyerId: currentUser.id }) });
-      const data = await res.json();
-      if (data.success) { alert('购买成功'); setBalance(data.balance); } else alert(data.error || '购买失败');
-    } catch { alert('网络错误'); }
-  };
+  const [purchaseOpen, setPurchaseOpen] = useState(false);
+  const [purchaseTarget, setPurchaseTarget] = useState<any>(null);
+  const openPurchase = (script:any) => { setPurchaseTarget(script); setPurchaseOpen(true); };
+  const handlePurchased = (b:number) => { setBalance(b); };
 
   return (
     <div className="card h-full flex flex-col">
@@ -65,13 +60,21 @@ export default function ScriptStore({ currentUser }: { currentUser: any }) {
                 </div>
                 <div className="flex items-center gap-2">
                   <span className="text-sm text-yellow-400">¥{s.price || 0}</span>
-                  <button disabled={owned} onClick={()=> purchase(s.id)} className={`px-2 py-1 rounded text-xs ${owned? 'bg-gray-600 text-gray-300':'bg-game-accent text-white hover:bg-opacity-80'}`}>{owned? '已拥有':'购买'}</button>
+                  <button disabled={owned} onClick={()=> openPurchase(s)} className={`px-2 py-1 rounded text-xs ${owned? 'bg-gray-600 text-gray-300':'bg-game-accent text-white hover:bg-opacity-80'}`}>{owned? '已拥有':'购买'}</button>
                 </div>
               </div>
             </div>
           );
         })}
       </div>
+    <PurchaseScriptModal
+      open={purchaseOpen}
+      onClose={()=> { setPurchaseOpen(false); setPurchaseTarget(null); }}
+      script={purchaseTarget}
+      userId={currentUser?.id}
+      balance={balance}
+      onPurchased={handlePurchased}
+    />
     </div>
   );
 }

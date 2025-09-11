@@ -1,10 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getScripts, saveScripts, getUserById, updateUser, ensureUserEconomicFields } from '@/lib/storage';
+import { getScripts, saveScripts, getUserById, updateUser, ensureUserEconomicFields, getScriptAggregateRating } from '@/lib/storage';
 
 // GET: 列出在售原创剧本
 export async function GET() {
   try {
-    const scripts = getScripts().filter(s => s.isListedForSale && !s.derivativeOfScriptId && (s.rootOriginalScriptId === undefined || s.rootOriginalScriptId === s.id));
+    let scripts = getScripts().filter(s => s.isListedForSale && !s.derivativeOfScriptId && (s.rootOriginalScriptId === undefined || s.rootOriginalScriptId === s.id));
+    // 补充评分聚合
+    scripts = scripts.map(s => {
+      if (s.averageRating === undefined || s.ratingCount === undefined) {
+        const agg = getScriptAggregateRating(s.id);
+        return { ...s, averageRating: agg.average, ratingCount: agg.count };
+      }
+      return s;
+    });
+    scripts.sort((a,b) => {
+      const aAvg = a.averageRating ?? 0; const bAvg = b.averageRating ?? 0;
+      if (bAvg !== aAvg) return bAvg - aAvg;
+      const aCount = a.ratingCount ?? 0; const bCount = b.ratingCount ?? 0;
+      if (bCount !== aCount) return bCount - aCount;
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
     return NextResponse.json({ success: true, scripts });
   } catch (e) {
     console.error('获取商店剧本失败', e);

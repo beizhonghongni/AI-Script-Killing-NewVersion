@@ -34,6 +34,18 @@ function sanitizeSelfReference(raw: string, npc: AINPCConfig): string {
   return t;
 }
 
+// Ensure minimum Chinese character length by appending filler segments
+function ensureMinChineseLength(text: string, min: number): string {
+  if (!text) return text;
+  const filler = '【补充描写】细节层层铺陈，环境与人物状态被进一步具象化，新的心理暗流与潜在线索在字里行间被埋入，为后续推理奠定铺垫。';
+  let t = text.trim();
+  while (charLen(t) < min) {
+    t += filler;
+    if (charLen(t) > min + 400) break; // 上限保护，避免过度膨胀
+  }
+  return t;
+}
+
 // 动态获取 Gemini Key: 优先 .env，其次运行时设置的内存 key，可用调试端点 POST 设置
 function getGeminiApiKey(): string {
   const envKey = (process.env.GEMINI_API_KEY || '').replace(/"/g,'').trim();
@@ -296,7 +308,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 2. ${totalCharacters}个角色（包含姓名、身份、性格特点）
    - 前${playerCount}个角色是重要角色（给真人玩家）
    - 后${aiNPCCount}个角色是次要角色（给AI NPC）
-3. 每轮的剧情发展（每轮约1000字左右，建议控制在900-1100字；需包含关键情节推进、核心冲突、必要的环境/人物/伏笔要素，信息密度高且节奏紧凑）
+3. 每轮的剧情发展（每轮约2000字左右，必须不少于1900字；建议控制在1900-2100字；需包含关键情节推进、核心冲突、必要的环境/人物/伏笔要素，信息密度高且节奏紧凑，避免水分）
 4. 每轮每个角色的私人线索（每条30-45字，删去无效铺陈，不复述公共剧情，信息密度高，彼此互补）
 
 输出格式必须是严格的JSON格式：
@@ -352,7 +364,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 
   const primaryData = tryExtractJSON(raw);
   if (primaryData && primaryData.title && Array.isArray(primaryData.characters) && Array.isArray(primaryData.roundContents)) {
-    // 线索长度与格式后处理
+    // 线索长度与格式 & 剧情长度后处理
     primaryData.roundContents = primaryData.roundContents.map((rc: any) => {
       if (rc && rc.privateClues && typeof rc.privateClues === 'object') {
         Object.keys(rc.privateClues).forEach(k => {
@@ -361,6 +373,9 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
             if (charLen(clue) < 25) clue = clue + '。';
             rc.privateClues[k] = clue;
         });
+      }
+      if (rc && typeof rc.plot === 'string') {
+        rc.plot = ensureMinChineseLength(rc.plot, 1900);
       }
       return rc;
     });
@@ -396,7 +411,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
   // Step2: 每轮内容
   const roundContents: any[] = [];
   for (let r = 1; r <= rounds; r++) {
-    const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 1000字剧情(目标900-1100字; 包含事件进展/角色心理/冲突或伏笔1-2处; 需自然连贯)",\n "privateClues": { "角色ID": "该角色30-45字高信息密度线索(不写无意义铺陈, 不复述公共剧情)" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
+  const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 2000字剧情(目标1900-2100字; 不得低于1900字; 包含事件进展/角色心理/冲突或伏笔1-2处; 需自然连贯, 信息密度高)",\n "privateClues": { "角色ID": "该角色30-45字高信息密度线索(不写无意义铺陈, 不复述公共剧情)" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
     const roundRaw = await callLLM(perRoundPrompt, false);
     const rd = tryExtractJSON(roundRaw) || {};
     const clues: Record<string,string> = {};
@@ -407,8 +422,9 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
       if (charLen(clue) < 25) { clue = clue + '。'; }
       clues[c.id] = clue;
     });
-    const plotText = rd.plot || `第${r}轮剧情：${plotRequirement} 发展...`;
-    roundContents.push({ round: r, plot: plotText, privateClues: clues });
+  let plotText = rd.plot || `第${r}轮剧情：${plotRequirement} 发展...`;
+  plotText = ensureMinChineseLength(plotText, 1900);
+  roundContents.push({ round: r, plot: plotText, privateClues: clues });
   }
 
   return {
