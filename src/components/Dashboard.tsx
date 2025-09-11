@@ -321,7 +321,11 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                                   try {
                                     const res = await fetch('/api/scripts/collected/publish', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, collectedScriptId: script.id, price: p }) });
                                     const data = await res.json();
-                                    if (data.success) { alert('上架成功'); }
+                                    if (data.success) { 
+                                      alert('上架成功'); 
+                                      // 触发数据刷新事件
+                                      window.dispatchEvent(new Event('userDataUpdated'));
+                                    }
                                     else alert(data.error || '上架失败');
                                   } catch { alert('网络错误'); }
                                 }}

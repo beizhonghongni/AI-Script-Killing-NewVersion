@@ -10,7 +10,9 @@ import { getUserById, getScripts, saveScripts, getUsers } from '@/lib/storage';
 // - 返回更新后的 script
 export async function POST(req: NextRequest) {
 	try {
-		const { userId, collectedScriptId, price } = await req.json();
+		let body: any = null;
+		try { body = await req.json(); } catch { return NextResponse.json({ success:false, error:'请求体不是有效JSON' }, { status:400 }); }
+		const { userId, collectedScriptId, price } = body || {};
 		if (!userId || !collectedScriptId) {
 			return NextResponse.json({ success: false, error: '缺少 userId 或 collectedScriptId' }, { status: 400 });
 		}
