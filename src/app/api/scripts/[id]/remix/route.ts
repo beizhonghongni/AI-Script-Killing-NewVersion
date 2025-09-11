@@ -14,32 +14,50 @@ export async function POST(
 ) {
   try {
     const { id: scriptId } = await params;
-  const { userId, instructions, overwrite } = await req.json();
+  const { userId, instructions, overwrite, personalCollectedId } = await req.json();
     if (!instructions || typeof instructions !== 'string') {
       return NextResponse.json({ success: false, error: '缺少修改说明' }, { status: 400 });
     }
     const base = getScriptById(scriptId);
     if (!base) return NextResponse.json({ success: false, error: '剧本不存在' }, { status: 404 });
 
-    const prompt = `你是剧本杀剧本的资深编辑。给定原始剧本(JSON)与用户的二次创作修改指令，只对涉及的部分进行最小必要修改：
+    // 如果是修改个人收藏副本，基于个人副本进行diff
+    let personalUser = null as any;
+    let personalCollected = null as any;
+    let baseForDiff: any = base;
+    if (personalCollectedId) {
+      personalUser = getUserById(userId);
+      if (!personalUser) return NextResponse.json({ success: false, error: '用户不存在' }, { status: 404 });
+      personalCollected = personalUser.collectedScripts?.find(cs => cs.id === personalCollectedId);
+      if (!personalCollected) return NextResponse.json({ success: false, error: '未找到对应的个人收藏副本' }, { status: 404 });
+      // 使用个人收藏副本作为diff基础（这样可以连续多次二次创作累积修改）
+      baseForDiff = personalCollected;
+    }
+
+  const prompt = `你是资深剧本杀编辑，需要进行“指令驱动 + 一致性联动”增量修改。用户说的“剧本”包含：背景、角色(身份/性格/动机)、各轮剧情、每轮全部角色私人线索。给定原始剧本(JSON)与修改指令：
 === 原始剧本 JSON 开始 ===
-${JSON.stringify(base)}
+${JSON.stringify(baseForDiff)}
 === 原始剧本 JSON 结束 ===
 
 用户修改指令：${instructions}
 
-要求：
-1. 只修改与指令相关的字段及保持逻辑一致所需的关联字段，其余保持完全一致。
-2. 输出严格 JSON，结构：
+规则：
+1. 精确执行指令；若指令引入/删除/改变元素（人物关系、地点、暗线、物品、冲突、反转、情绪基调），需要同步更新所有受影响部分。
+2. 受影响范围：background / 相关角色属性(identity, personality, 可能隐含动机描述) / 轮次剧情plot / 对应轮次所有角色 privateClues。
+3. 指令出现 任意关键词：背景|场景|设定|角色|人物|性格|动机|线索|clue|伏笔|反转 -> 必须返回对应被影响部分（即便只是微调）。
+4. 修改过的轮次对象需返回完整 { round, plot, privateClues }。privateClues 中列出该剧本全部角色的线索键；未变化的线索可原样返回。
+5. 若剧情新增元素但原 background 未体现，应在 background 中补写；若剧情变化无需调整背景，可仍返回 background 以保持显式同步。
+6. 若无任何应改动（极少见），返回 { "modified": false }。
+7. 输出严格 JSON 结构（无 markdown 包裹、无注释）：
 {
   "modified": true,
-  "title": "(如需改标题才提供)",
-  "background": "(仅修改时提供)",
-  "characters": [ ...(仅有改动的角色对象，未改的不返回) ],
-  "roundContents": [ ...(仅改动的轮次对象 round/plot/privateClues) ]
+  "title": "(仅标题确需修改时)",
+  "background": "(按规则5，需要变或显式同步时返回)",
+  "characters": [ ...(仅改动角色对象) ],
+  "roundContents": [ ...(仅改动轮次完整对象) ]
 }
-3. 不返回未修改的部分；未提供字段表示保持不变。
-4. roundContents 中仅包含修改过的轮次，且提供完整该轮对象。
+8. 不返回未修改的角色或轮次；未出现的字段视为保持不变。
+9. 不要虚构无关大幅重写；保持最小必要修改同时保证逻辑前后一致。
 `;
 
     const raw = await callLLM(prompt, true);
@@ -48,6 +66,37 @@ ${JSON.stringify(base)}
       diff = JSON.parse(raw.trim().replace(/^```json|```/g,''));
     } catch {
       return NextResponse.json({ success: false, error: 'LLM输出解析失败', raw });
+    }
+
+    // 如果是个人收藏副本编辑，直接更新用户收藏，不创建新脚本
+    if (personalCollected && personalUser) {
+      const diffHasChanges = !!(diff.title || diff.background || (Array.isArray(diff.characters)&&diff.characters.length) || (Array.isArray(diff.roundContents)&&diff.roundContents.length));
+      if (!diffHasChanges) {
+        return NextResponse.json({ success: true, noChange: true, collectedScript: personalCollected, diffRaw: raw });
+      }
+      const historyEntry = {
+        at: Date.now(),
+        instructions,
+        changedRounds: Array.isArray(diff.roundContents) ? diff.roundContents.map((r:any)=>r.round).filter((v:any)=>typeof v==='number') : [],
+        changedCharacters: Array.isArray(diff.characters) ? diff.characters.map((c:any)=>c.id).filter((v:any)=>!!v) : [],
+        titleChanged: !!diff.title,
+        backgroundChanged: !!diff.background,
+      };
+      if (diff.title) personalCollected.title = diff.title;
+      if (diff.background) personalCollected.background = diff.background;
+      if (Array.isArray(diff.characters) && diff.characters.length) {
+        const charMap = new Map(personalCollected.characters.map((c:any)=>[c.id,c]));
+        diff.characters.forEach((c:any)=>{ if (c.id && charMap.has(c.id)) Object.assign(charMap.get(c.id)!, c); });
+        personalCollected.characters = Array.from(charMap.values());
+      }
+      if (Array.isArray(diff.roundContents) && diff.roundContents.length) {
+        const rcMap = new Map(personalCollected.roundContents.map((r:any)=>[r.round,r]));
+        diff.roundContents.forEach((r:any)=>{ if (r.round && rcMap.has(r.round)) Object.assign(rcMap.get(r.round)!, r); });
+        personalCollected.roundContents = Array.from(rcMap.values()).sort((a:any,b:any)=>a.round-b.round);
+      }
+      (personalCollected.remixHistory = personalCollected.remixHistory || []).push(historyEntry);
+      try { updateUser(personalUser); } catch (e) { console.error('保存个人收藏修改失败', e); }
+      return NextResponse.json({ success: true, collectedScript: personalCollected, personal: true, diffRaw: raw });
     }
 
     // 如果请求覆盖且是原作者，直接就地修改原脚本
@@ -82,7 +131,7 @@ ${JSON.stringify(base)}
       createdBy: userId, // 新的作者（再创作者）
     };
 
-    if (diff.title) newScript.title = diff.title;
+  if (diff.title) newScript.title = diff.title;
     if (diff.background) newScript.background = diff.background;
     if (Array.isArray(diff.characters) && diff.characters.length) {
       const charMap = new Map(newScript.characters.map(c => [c.id, c]));
@@ -123,6 +172,14 @@ ${JSON.stringify(base)}
             rootOriginalScriptId: newScript.rootOriginalScriptId,
             originalAuthorId: newScript.originalAuthorId,
             derivativeOfScriptId: newScript.derivativeOfScriptId,
+            remixHistory: [{
+              at: Date.now(),
+              instructions,
+              changedRounds: Array.isArray(diff.roundContents) ? diff.roundContents.map((r:any)=>r.round).filter((v:any)=>typeof v==='number') : [],
+              changedCharacters: Array.isArray(diff.characters) ? diff.characters.map((c:any)=>c.id).filter((v:any)=>!!v) : [],
+              titleChanged: !!diff.title,
+              backgroundChanged: !!diff.background,
+            }],
         } as any);
         try { updateUser(user); } catch (e) { console.error('更新用户收藏失败', e); }
       }

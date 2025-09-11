@@ -33,6 +33,17 @@ export interface CollectedScript {
   rootOriginalScriptId?: string; // 初始原创脚本ID（若本身原创则等于originalScriptId）
   originalAuthorId?: string; // 初始原创作者ID
   derivativeOfScriptId?: string; // 直接来源的脚本ID（上一代）
+  // 二次创作历史（只存增量元数据，不重复全文）
+  remixHistory?: RemixHistoryEntry[];
+}
+
+export interface RemixHistoryEntry {
+  at: number; // 时间戳
+  instructions: string; // 用户指令
+  changedRounds?: number[]; // 修改到的轮次编号
+  changedCharacters?: string[]; // 修改到的角色ID集合
+  titleChanged?: boolean;
+  backgroundChanged?: boolean;
 }
 
 // AI NPC 角色类型

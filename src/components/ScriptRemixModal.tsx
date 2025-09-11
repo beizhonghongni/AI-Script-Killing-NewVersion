@@ -3,13 +3,14 @@ import { useEffect, useState } from 'react';
 import RatingStars from './RatingStars';
 
 interface ScriptRemixModalProps {
-  scriptId: string;
+  scriptId: string; // 原始脚本ID（或根脚本ID）
+  personalCollectedId?: string; // 当前用户个人收藏副本ID（若在编辑自己的副本）
   onClose: () => void;
   currentUser: any;
   onRemixCompleted?: (script:any)=>void;
 }
 
-export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRemixCompleted }: ScriptRemixModalProps) {
+export default function ScriptRemixModal({ scriptId, personalCollectedId, onClose, currentUser, onRemixCompleted }: ScriptRemixModalProps) {
   const [baseScript, setBaseScript] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -22,12 +23,26 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
   const load = async () => {
     setLoading(true); setError('');
     try {
-      const res = await fetch(`/api/scripts/${scriptId}`);
-      if (!res.ok) {
-        setError(`请求失败(${res.status})`);
+      if (personalCollectedId) {
+        // 加载用户个人收藏副本
+        const res = await fetch(`/api/users/${currentUser.id}/profile`);
+        if (!res.ok) {
+          setError(`请求失败(${res.status})`);
+        } else {
+          const data = await res.json();
+            if (data.success) {
+              const cs = (data.user.collectedScripts || []).find((c:any)=> c.id === personalCollectedId);
+              if (cs) setBaseScript(cs); else setError('未找到个人收藏副本');
+            } else setError(data.error||'加载失败');
+        }
       } else {
-        const data = await res.json();
-        if (data.success) setBaseScript(data.script); else setError(data.error||'加载失败');
+        const res = await fetch(`/api/scripts/${scriptId}`);
+        if (!res.ok) {
+          setError(`请求失败(${res.status})`);
+        } else {
+          const data = await res.json();
+          if (data.success) setBaseScript(data.script); else setError(data.error||'加载失败');
+        }
       }
     } catch (e:any) {
       setError('网络错误：可能是服务未启动或断开');
@@ -41,14 +56,19 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
     if (!instructions.trim()) return;
     setWorking(true);
     try {
-      const res = await fetch(`/api/scripts/${scriptId}/remix`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, instructions, overwrite }) });
+      const res = await fetch(`/api/scripts/${scriptId}/remix`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, instructions, overwrite, personalCollectedId }) });
       const data = await res.json();
       if (data.success) {
-        setPreview(data.script);
-        setHistory(h => [...h, { at: Date.now(), instructions, script: data.script }]);
+        const updated = data.script || data.collectedScript;
+        if (updated) {
+          setPreview(updated);
+          // 如果是个人副本编辑，基础脚本也更新
+          if (data.personal) setBaseScript(updated);
+          setHistory(h => [...h, { at: Date.now(), instructions, script: updated }]);
+        }
         setInstructions('');
         // 如果返回collected或overwrite成功，触发外部刷新用户数据
-        if (data.collected || data.overwritten) {
+        if (data.collected || data.overwritten || data.personal) {
           window.dispatchEvent(new Event('userDataUpdated'));
         }
       } else {
@@ -65,6 +85,7 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
   };
 
   const showScript = preview || baseScript;
+  const persistentHistory = (baseScript?.remixHistory || []) as any[];
 
   return (
     <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
@@ -133,15 +154,37 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
                 <button onClick={finish} className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm">完成并保存</button>
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-4 space-y-3 text-xs text-gray-400">
-              <div className="text-gray-300 text-sm font-medium">修改历史</div>
-              {history.length === 0 && <div className="text-gray-500">暂无</div>}
-              {history.map(h => (
-                <div key={h.at} className="border border-gray-700 rounded p-2">
-                  <div className="text-[10px] text-gray-500">{new Date(h.at).toLocaleTimeString()}</div>
-                  <div className="text-gray-300 whitespace-pre-wrap">{h.instructions}</div>
+            <div className="flex-1 overflow-y-auto p-4 space-y-5 text-xs text-gray-400">
+              <div>
+                <div className="text-gray-300 text-sm font-medium">本次会话新增历史(未关闭前)</div>
+                {history.length === 0 && <div className="text-gray-500">暂无</div>}
+                {history.map(h => (
+                  <div key={h.at} className="border border-gray-700 rounded p-2">
+                    <div className="text-[10px] text-gray-500">{new Date(h.at).toLocaleTimeString()}</div>
+                    <div className="text-gray-300 whitespace-pre-wrap">{h.instructions}</div>
+                  </div>
+                ))}
+              </div>
+              <div>
+                <div className="text-gray-300 text-sm font-medium flex items-center gap-2">历史累计
+                  <span className="text-[10px] text-gray-500">({persistentHistory.length})</span>
                 </div>
-              ))}
+                {persistentHistory.length === 0 && <div className="text-gray-500">暂无持久历史</div>}
+                {persistentHistory.slice().reverse().map(entry => (
+                  <div key={entry.at} className="border border-gray-800 rounded p-2 bg-gray-900/40">
+                    <div className="flex justify-between">
+                      <span className="text-[10px] text-gray-500">{new Date(entry.at).toLocaleString()}</span>
+                      <span className="text-[10px] text-purple-400">轮:{(entry.changedRounds||[]).join(',')||'-'}</span>
+                    </div>
+                    <div className="text-gray-300 whitespace-pre-wrap mt-1">{entry.instructions}</div>
+                    <div className="mt-1 text-[10px] text-gray-500 flex flex-wrap gap-2">
+                      {entry.titleChanged && <span>标题✓</span>}
+                      {entry.backgroundChanged && <span>背景✓</span>}
+                      {(entry.changedCharacters||[]).length>0 && <span>角:{entry.changedCharacters.length}</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         </div>

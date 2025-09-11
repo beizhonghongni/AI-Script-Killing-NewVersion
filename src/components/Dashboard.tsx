@@ -29,6 +29,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
   const [chatFriend, setChatFriend] = useState<any>(null);
   const [showStore, setShowStore] = useState(false);
   const [remixScriptId, setRemixScriptId] = useState<string | null>(null);
+  const [remixCollectedId, setRemixCollectedId] = useState<string | null>(null);
   const [ratingSubmitting, setRatingSubmitting] = useState<string | null>(null);
 
   const rateOriginal = async (script: any) => {
@@ -282,7 +283,9 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                     </div>
                   ) : (
                     <div className="space-y-3">
-                      {currentUser.collectedScripts.map((script) => (
+                      {([...currentUser.collectedScripts]
+                        .sort((a:any,b:any)=> (b.collectedAt||0) - (a.collectedAt||0)))
+                        .map((script) => (
                         <div 
                           key={script.id} 
                           className="bg-gray-800 rounded-lg p-3 hover:bg-gray-700 transition-colors cursor-pointer"
@@ -298,7 +301,7 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
                           <div className="mt-2 flex items-center gap-2 flex-wrap">
                             <button
                               type="button"
-                              onClick={(e) => { e.stopPropagation(); setRemixScriptId(script.originalScriptId || script.id); }}
+                              onClick={(e) => { e.stopPropagation(); setRemixScriptId(script.originalScriptId || script.id); setRemixCollectedId(script.id); }}
                               className="text-xs px-2 py-1 bg-purple-600/40 hover:bg-purple-600/60 text-purple-200 rounded"
                             >二次创作</button>
                             <button
@@ -382,12 +385,13 @@ export default function Dashboard({ user, onLogout }: DashboardProps) {
           collectedScripts={currentUser?.collectedScripts || []}
         />
       )}
-      {remixScriptId && (
+    {remixScriptId && (
         <ScriptRemixModal
           scriptId={remixScriptId}
           onClose={()=> setRemixScriptId(null)}
           currentUser={currentUser}
-          onRemixCompleted={(newScript)=> { /* 生成后刷新脚本列表? 暂留 */}}
+      personalCollectedId={remixCollectedId || undefined}
+      onRemixCompleted={(newScript)=> { window.dispatchEvent(new Event('userDataUpdated')); setRemixCollectedId(null); }}
         />
       )}
     </div>
