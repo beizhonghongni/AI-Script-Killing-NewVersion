@@ -1935,7 +1935,9 @@ function FriendStylePicker({ currentUser, onChange }) {
                 <div className="flex items-center justify-between">
                   <div>
                     <div className="text-white text-sm">{fs.username} 的风格</div>
-                    <div className="text-slate-300 text-xs mt-1 line-clamp-2">{fs.recentStyleSample || '暂无样本'}</div>
+                    {fs.recentStyleSample && (
+                      <div className="text-slate-300 text-xs mt-1 line-clamp-2">{fs.recentStyleSample}</div>
+                    )}
                   </div>
                   <input type="checkbox" className="w-4 h-4" checked={checked} onChange={() => toggle(fs)} />
                 </div>

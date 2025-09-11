@@ -127,15 +127,13 @@ export async function callLLM(prompt: string, useProModel = false, retries = 3):
     try {
       console.log(`LLM API调用尝试 ${attempt}/${retries}...`);
       
-    let response = await fetch(primaryUrl, {
+  let response = await fetch(primaryUrl, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
       'X-goog-api-key': getGeminiApiKey(),
         },
-        body: JSON.stringify(request),
-        // 增加超时时间
-        signal: AbortSignal.timeout(60000) // 60秒超时
+    body: JSON.stringify(request)
       });
 
       if (!response.ok) {
@@ -152,8 +150,7 @@ export async function callLLM(prompt: string, useProModel = false, retries = 3):
                 'Content-Type': 'application/json',
                 'X-goog-api-key': getGeminiApiKey(),
               },
-              body: JSON.stringify(request),
-              signal: AbortSignal.timeout(45000)
+              body: JSON.stringify(request)
             });
             if (response.ok) {
               const data: LLMResponse = await response.json();
@@ -408,7 +405,12 @@ ${lastMessage ? `最新发言 => ${lastMessage.senderName}: ${lastMessage.conten
 
 请决定：
 1. 是否需要发言（重点考虑是否要回应最新发言、讨论热度、是否有新信息、角色性格等）
-2. 如果发言，说什么内容（必须使用第一人称“我”，符合角色性格，直接回应最新发言并推进讨论，不要重复已说过的内容，控制在1-2句、总字数不超过60字、不要使用叙述者视角或第三人称描述该NPC）
+2. 如果发言，说什么内容：
+  - 必须使用第一人称“我”，绝不能出现自己的姓名或姓名片段（例如把“${npc.name.split(/[·•]/)[0]}”写出来指代自己）
+  - 不得使用旁白/叙述者语气，不要描述自己的表情、语气、动作（除非极简且与推理相关）
+  - 回应最新发言并推进讨论，不复述已知信息，不空洞评价
+  - 不要说“我觉得我...”“我认为我...”，避免重复“我”结构
+  - 限制 1-2 句，总字数不超过60字
 
 输出格式必须是JSON：
 {
@@ -453,16 +455,22 @@ ${lastMessage ? `最新发言 => ${lastMessage.senderName}: ${lastMessage.conten
       let t = decision.content.trim();
       // 去引号
       t = t.replace(/^["“”']+|["“”']+$/g, '');
-      // 保证第一人称
+      // 不要把自己名字或其前缀当成第三人称提及，统一第一人称
+      const nameParts = npc.name.split(/[·•]/).filter(p => p.length > 0);
+      // 粗替换独立出现的姓名或片段
+      nameParts.forEach(p => {
+        const reg = new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`) + '(?=[，。！!？?、:\s]|$)', 'g');
+        t = t.replace(reg, '我');
+      });
+      // 全名也再替换一次
+      const fullNameReg = new RegExp(npc.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`), 'g');
+      t = t.replace(fullNameReg, '我');
+      // 若仍无“我”，前置“我”
       if (!t.includes('我')) {
-        t = (t.length <= 58 ? `我觉得${t}` : `我觉得${t.slice(0, 56)}`);
+        t = (t.length <= 58 ? `我${t}` : `我${t.slice(0, 58)}`);
       }
-  // 不要把自己名字当成第二人称或第三人称提及，替换为“我”
-  const selfName = npc.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`);
-  const selfNameRegex = new RegExp(selfName + '(?=[，。！!？?、,\s])', 'g');
-  t = t.replace(selfNameRegex, '我');
-  // 避免“我觉得我”重复
-  t = t.replace(/我觉得我/g, '我觉得');
+      // 清理重复结构
+      t = t.replace(/我觉得我/g, '我觉得').replace(/我认为我/g, '我认为');
       // 限长
       if (t.length > 60) t = t.slice(0, 60);
       content = t;
@@ -615,7 +623,7 @@ export async function generateNPCResponse(context: {
 }): Promise<string> {
   const { userMessage, aiNPC, gameContext, gameRecord } = context;
   
-  const prompt = `你是一个剧本杀游戏中的AI NPC，名为"${aiNPC.name}"，性格特点是：${aiNPC.personality}。
+  const prompt = `你是一个剧本杀游戏中的AI NPC，名为"${aiNPC.name}"，性格特点：${aiNPC.personality}。
 
 游戏背景：
 ${gameContext.background}
@@ -625,11 +633,12 @@ ${gameContext.background}
 最近的聊天记录：
 ${gameContext.recentMessages.map(msg => `${msg.senderName}: ${msg.content}`).join('\n')}
 
-请根据你的性格特点，对这个发言做出1-2句简短的回应。必须严格遵守：
-1. 仅使用第一人称“我”，不要出现第三人称描述自己或旁白语气。
-2. 与游戏剧情相关并回应该玩家刚才的话，推动讨论。
-3. 自然口语化，不要过于书面或官话；长度不超过60字。
-4. 不要暴露你是AI，不要复述系统信息或背景。
+请根据你的性格特点，对这个发言做出1-2句简短回应。必须严格遵守：
+1. 只能用第一人称“我”指代自己，绝不能出现自己的姓名或姓名片段替代“我”。
+2. 不使用旁白/解说/舞台提示语，不描述自己长篇动作，仅在必要时用一个动词（如“我注意到”）。
+3. 必须直接回应玩家内容，推动推理或提出疑问，不复述对方原句。
+4. 避免模板化：不要连续使用“我觉得”“我认为”开头；如出现，尽量只保留一个。
+5. 长度不超过60字，不暴露系统或AI身份。
 
 直接输出文本内容（不要JSON、不要引号、不要前后缀）：`;
 
@@ -638,14 +647,18 @@ ${gameContext.recentMessages.map(msg => `${msg.senderName}: ${msg.content}`).joi
     let t = response.trim();
     // 去引号
     t = t.replace(/^["“”']+|["“”']+$/g, '');
-    // 保证第一人称
+    // 替换姓名及片段为“我”
+    const nameParts = aiNPC.name.split(/[·•]/).filter(p => p.length > 0);
+    nameParts.forEach(p => {
+      const reg = new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`) + '(?=[，。！!？?、:\s]|$)', 'g');
+      t = t.replace(reg, '我');
+    });
+    const fullNameReg = new RegExp(aiNPC.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`), 'g');
+    t = t.replace(fullNameReg, '我');
     if (!t.includes('我')) {
-      t = (t.length <= 58 ? `我觉得${t}` : `我觉得${t.slice(0, 56)}`);
+      t = (t.length <= 58 ? `我${t}` : `我${t.slice(0, 58)}`);
     }
-  const selfName = aiNPC.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`);
-  const selfNameRegex = new RegExp(selfName + '(?=[，。！!？?、,\s])', 'g');
-  t = t.replace(selfNameRegex, '我');
-  t = t.replace(/我觉得我/g, '我觉得');
+    t = t.replace(/我觉得我/g, '我觉得').replace(/我认为我/g, '我认为');
     // 限长
     if (t.length > 60) t = t.slice(0, 60);
     return t;
