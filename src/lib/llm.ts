@@ -1,5 +1,39 @@
 import { LLMRequest, LLMResponse, LLMContext, GameRecord, Script, AINPCConfig } from '@/types';
 
+// --- Utility helpers for text constraints & self-reference sanitization ---
+function charLen(str: string): number { return Array.from(str || '').length; }
+function clampChinese(str: string, max: number): string {
+  if (!str) return str;
+  const arr = Array.from(str.trim());
+  return arr.length <= max ? str.trim() : arr.slice(0, max).join('').replace(/[，。；,.!?！？]*$/, '');
+}
+function sanitizeSelfReference(raw: string, npc: AINPCConfig): string {
+  if (!raw) return raw;
+  const displayName = npc.characterName || npc.name;
+  // Extract possible tokens: Chinese part, English part in parenthesis, full name sans spaces
+  const tokens = new Set<string>();
+  const chinesePartMatch = displayName.split(/[(（]/)[0].trim();
+  if (chinesePartMatch) tokens.add(chinesePartMatch);
+  const parenMatch = /[(（]([^()（）]+)[)）]/.exec(displayName);
+  if (parenMatch) tokens.add(parenMatch[1]);
+  tokens.add(displayName.replace(/[()（）]/g,'').trim());
+  // If name originally was style label (for friend style AI) include original style label too
+  if (npc.friendStyleOfUserId && npc.name !== displayName) tokens.add(npc.name);
+  const honorific = '(?:先生|女士|小姐|同学|队长|老师)?';
+  let t = raw;
+  tokens.forEach(tok => {
+    if (!tok) return;
+    const safe = tok.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`);
+    const reg = new RegExp(safe + honorific, 'g');
+    t = t.replace(reg, '我');
+  });
+  // If still no first person, prepend one
+  if (!t.includes('我')) t = '我' + t;
+  // Reduce duplicated patterns
+  t = t.replace(/我觉得我/g,'我觉得').replace(/我认为我/g,'我认为');
+  return t;
+}
+
 // 动态获取 Gemini Key: 优先 .env，其次运行时设置的内存 key，可用调试端点 POST 设置
 function getGeminiApiKey(): string {
   const envKey = (process.env.GEMINI_API_KEY || '').replace(/"/g,'').trim();
@@ -263,7 +297,7 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
    - 前${playerCount}个角色是重要角色（给真人玩家）
    - 后${aiNPCCount}个角色是次要角色（给AI NPC）
 3. 每轮的剧情发展（每轮约1000字左右，建议控制在900-1100字；需包含关键情节推进、核心冲突、必要的环境/人物/伏笔要素，信息密度高且节奏紧凑）
-4. 每轮每个角色的私人线索（每个50-80字，要有差异性和关联性）
+4. 每轮每个角色的私人线索（每条30-45字，删去无效铺陈，不复述公共剧情，信息密度高，彼此互补）
 
 输出格式必须是严格的JSON格式：
 {
@@ -318,6 +352,18 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
 
   const primaryData = tryExtractJSON(raw);
   if (primaryData && primaryData.title && Array.isArray(primaryData.characters) && Array.isArray(primaryData.roundContents)) {
+    // 线索长度与格式后处理
+    primaryData.roundContents = primaryData.roundContents.map((rc: any) => {
+      if (rc && rc.privateClues && typeof rc.privateClues === 'object') {
+        Object.keys(rc.privateClues).forEach(k => {
+          let clue = (rc.privateClues[k] || '').toString().replace(/^(线索|提示)[:：]/,'').trim();
+            clue = clampChinese(clue, 45);
+            if (charLen(clue) < 25) clue = clue + '。';
+            rc.privateClues[k] = clue;
+        });
+      }
+      return rc;
+    });
     return {
       id: `script_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       title: primaryData.title,
@@ -350,14 +396,19 @@ AI NPC数量：${aiNPCCount}（需要分配次要角色）
   // Step2: 每轮内容
   const roundContents: any[] = [];
   for (let r = 1; r <= rounds; r++) {
-  const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 1000字剧情(目标900-1100字; 包含事件进展/角色心理/冲突或伏笔1-2处; 需自然连贯)",\n "privateClues": { "角色ID": "该角色50-80字线索" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
+    const perRoundPrompt = `仅输出本轮 JSON：{\n "round": ${r},\n "plot": "第${r}轮 1000字剧情(目标900-1100字; 包含事件进展/角色心理/冲突或伏笔1-2处; 需自然连贯)",\n "privateClues": { "角色ID": "该角色30-45字高信息密度线索(不写无意义铺陈, 不复述公共剧情)" }\n}\n角色ID列表: ${characters.map(c=>c.id).join(', ')}\n剧情主题：${plotRequirement}`;
     const roundRaw = await callLLM(perRoundPrompt, false);
     const rd = tryExtractJSON(roundRaw) || {};
-    const clues: any = {};
+    const clues: Record<string,string> = {};
     characters.forEach(c => {
-      clues[c.id] = (rd.privateClues && rd.privateClues[c.id]) || `线索：${plotRequirement} 的线索片段 (${c.id})`;
+      const rawClue = (rd.privateClues && rd.privateClues[c.id]) || `${plotRequirement} 独有线索片段`;
+      let clue = rawClue.replace(/^(线索|提示)[:：]/,'').trim();
+      clue = clampChinese(clue, 45);
+      if (charLen(clue) < 25) { clue = clue + '。'; }
+      clues[c.id] = clue;
     });
-    roundContents.push({ round: r, plot: rd.plot || `第${r}轮剧情：${plotRequirement} 发展...`, privateClues: clues });
+    const plotText = rd.plot || `第${r}轮剧情：${plotRequirement} 发展...`;
+    roundContents.push({ round: r, plot: plotText, privateClues: clues });
   }
 
   return {
@@ -453,26 +504,9 @@ ${lastMessage ? `最新发言 => ${lastMessage.senderName}: ${lastMessage.conten
     let content: string | undefined = undefined;
     if (decision.shouldSpeak && typeof decision.content === 'string') {
       let t = decision.content.trim();
-      // 去引号
       t = t.replace(/^["“”']+|["“”']+$/g, '');
-      // 不要把自己名字或其前缀当成第三人称提及，统一第一人称
-      const nameParts = npc.name.split(/[·•]/).filter(p => p.length > 0);
-      // 粗替换独立出现的姓名或片段
-      nameParts.forEach(p => {
-        const reg = new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`) + '(?=[，。！!？?、:\s]|$)', 'g');
-        t = t.replace(reg, '我');
-      });
-      // 全名也再替换一次
-      const fullNameReg = new RegExp(npc.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`), 'g');
-      t = t.replace(fullNameReg, '我');
-      // 若仍无“我”，前置“我”
-      if (!t.includes('我')) {
-        t = (t.length <= 58 ? `我${t}` : `我${t.slice(0, 58)}`);
-      }
-      // 清理重复结构
-      t = t.replace(/我觉得我/g, '我觉得').replace(/我认为我/g, '我认为');
-      // 限长
-      if (t.length > 60) t = t.slice(0, 60);
+      t = sanitizeSelfReference(t, npc);
+      if (t.length > 60) t = t.slice(0,60);
       content = t;
     } else if (!decision.shouldSpeak && directAddressed) {
       // 如果被直接点名或问号结尾却不想说，强制给一句回应
@@ -644,24 +678,11 @@ ${gameContext.recentMessages.map(msg => `${msg.senderName}: ${msg.content}`).joi
 
   try {
     const response = await callLLM(prompt, false);
-    let t = response.trim();
-    // 去引号
-    t = t.replace(/^["“”']+|["“”']+$/g, '');
-    // 替换姓名及片段为“我”
-    const nameParts = aiNPC.name.split(/[·•]/).filter(p => p.length > 0);
-    nameParts.forEach(p => {
-      const reg = new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`) + '(?=[，。！!？?、:\s]|$)', 'g');
-      t = t.replace(reg, '我');
-    });
-    const fullNameReg = new RegExp(aiNPC.name.replace(/[.*+?^${}()|[\]\\]/g, r => `\\${r}`), 'g');
-    t = t.replace(fullNameReg, '我');
-    if (!t.includes('我')) {
-      t = (t.length <= 58 ? `我${t}` : `我${t.slice(0, 58)}`);
-    }
-    t = t.replace(/我觉得我/g, '我觉得').replace(/我认为我/g, '我认为');
-    // 限长
-    if (t.length > 60) t = t.slice(0, 60);
-    return t;
+  let t = response.trim();
+  t = t.replace(/^["“”']+|["“”']+$/g, '');
+  t = sanitizeSelfReference(t, aiNPC);
+  if (t.length > 60) t = t.slice(0,60);
+  return t;
   } catch (error) {
     console.error('Failed to generate NPC response:', error);
     // 返回备用回复
@@ -761,7 +782,7 @@ ${baseScript.roundContents.map(rc => `第${rc.round}轮：${rc.plot}`).join('\n'
       parsed.personalRoundContents = parsed.personalRoundContents.map((r: any, idx: number) => ({
         round: r.round || (idx + 1),
         personalPlot: r.personalPlot || r.plot || `第${idx + 1}轮：${baseScript.roundContents[idx]?.plot || '剧情待补充'}`,
-        hiddenInfo: r.hiddenInfo || r.secret || '你掌握着一些暂时不便透露的线索'
+  hiddenInfo: clampChinese(r.hiddenInfo || r.secret || '你掌握着一些暂时不便透露的线索', 80)
       }));
       return parsed;
     }
