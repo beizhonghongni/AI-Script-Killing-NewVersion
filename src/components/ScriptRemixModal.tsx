@@ -17,6 +17,7 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
   const [working, setWorking] = useState(false);
   const [preview, setPreview] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [overwrite, setOverwrite] = useState(false);
 
   const load = async () => {
     setLoading(true); setError('');
@@ -40,12 +41,16 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
     if (!instructions.trim()) return;
     setWorking(true);
     try {
-      const res = await fetch(`/api/scripts/${scriptId}/remix`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, instructions }) });
+      const res = await fetch(`/api/scripts/${scriptId}/remix`, { method: 'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ userId: currentUser.id, instructions, overwrite }) });
       const data = await res.json();
       if (data.success) {
         setPreview(data.script);
         setHistory(h => [...h, { at: Date.now(), instructions, script: data.script }]);
         setInstructions('');
+        // 如果返回collected或overwrite成功，触发外部刷新用户数据
+        if (data.collected || data.overwritten) {
+          window.dispatchEvent(new Event('userDataUpdated'));
+        }
       } else {
         alert(data.error || '修改失败');
       }
@@ -117,6 +122,12 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
             <div className="p-4 space-y-3 border-b border-gray-700">
               <div className="text-white text-sm font-medium">修改指令</div>
               <textarea value={instructions} onChange={e=> setInstructions(e.target.value)} className="w-full h-32 bg-gray-800 rounded p-2 text-sm text-gray-200 focus:outline-none focus:ring-1 focus:ring-purple-500" placeholder="示例：修改第2轮结尾增加反转线索，并把角色A性格改成更偏执" />
+              {baseScript && currentUser?.id === baseScript.createdBy && (
+                <label className="flex items-center gap-2 text-xs text-gray-400 select-none">
+                  <input type="checkbox" checked={overwrite} onChange={e=> setOverwrite(e.target.checked)} className="accent-purple-500" />
+                  覆盖原脚本(仅原作者可选) – 将直接修改原脚本而不是创建新副本
+                </label>
+              )}
               <div className="flex gap-2">
                 <button disabled={working || !instructions.trim()} onClick={applyRemix} className="px-3 py-2 bg-game-accent text-white rounded text-sm disabled:opacity-50">{working? '生成中...':'应用修改'}</button>
                 <button onClick={finish} className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white rounded text-sm">完成并保存</button>

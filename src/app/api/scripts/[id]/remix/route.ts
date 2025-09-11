@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { getScriptById, createScript, getScripts, saveScripts } from '@/lib/storage';
+import { getScriptById, getScripts, saveScripts, getUserById, updateUser } from '@/lib/storage';
 import { callLLM } from '@/lib/llm';
 import { Script } from '@/types';
 
@@ -14,7 +14,7 @@ export async function POST(
 ) {
   try {
     const { id: scriptId } = await params;
-    const { userId, instructions } = await req.json();
+  const { userId, instructions, overwrite } = await req.json();
     if (!instructions || typeof instructions !== 'string') {
       return NextResponse.json({ success: false, error: '缺少修改说明' }, { status: 400 });
     }
@@ -50,7 +50,28 @@ ${JSON.stringify(base)}
       return NextResponse.json({ success: false, error: 'LLM输出解析失败', raw });
     }
 
-    // 合并
+    // 如果请求覆盖且是原作者，直接就地修改原脚本
+    if (overwrite && userId === base.createdBy) {
+      const scripts = getScripts();
+      const target = scripts.find(s => s.id === base.id);
+      if (!target) return NextResponse.json({ success: false, error: '原脚本未找到(覆盖失败)' }, { status: 404 });
+      if (diff.title) target.title = diff.title;
+      if (diff.background) target.background = diff.background;
+      if (Array.isArray(diff.characters) && diff.characters.length) {
+        const charMap = new Map(target.characters.map(c => [c.id, c]));
+        diff.characters.forEach((c: any) => { if (c.id && charMap.has(c.id)) { Object.assign(charMap.get(c.id)!, c); } });
+        target.characters = Array.from(charMap.values());
+      }
+      if (Array.isArray(diff.roundContents) && diff.roundContents.length) {
+        const rcMap = new Map(target.roundContents.map(r => [r.round, r]));
+        diff.roundContents.forEach((r: any) => { if (r.round && rcMap.has(r.round)) { Object.assign(rcMap.get(r.round)!, r); } });
+        target.roundContents = Array.from(rcMap.values()).sort((a,b)=>a.round-b.round);
+      }
+      saveScripts(scripts);
+      return NextResponse.json({ success: true, script: target, overwritten: true, diffRaw: raw });
+    }
+
+    // 否则创建新的派生脚本
     const newScript: Script = {
       ...base,
       id: `script_${Date.now()}_${Math.random().toString(36).slice(2,8)}`,
@@ -77,12 +98,37 @@ ${JSON.stringify(base)}
     newScript.isListedForSale = false;
     newScript.price = undefined;
 
-    // 保存
     const scripts = getScripts();
     scripts.push(newScript);
     saveScripts(scripts);
 
-    return NextResponse.json({ success: true, script: newScript, diffRaw: raw });
+    // 自动加入用户收藏（便于后续查看）
+    const user = getUserById(userId);
+    if (user) {
+      (user.collectedScripts = user.collectedScripts || []);
+      // 避免重复收藏
+      if (!user.collectedScripts.find(cs => cs.id === newScript.id)) {
+        user.collectedScripts.push({
+          id: newScript.id,
+            originalScriptId: base.id, // 原始脚本ID（用于继续指向根）
+            originalGameId: 'remix_manual',
+            title: newScript.title,
+            rounds: newScript.rounds,
+            background: newScript.background,
+            characters: newScript.characters,
+            roundContents: newScript.roundContents,
+            plotRequirement: newScript.plotRequirement || '',
+            collectedAt: Date.now(),
+            collectedBy: userId,
+            rootOriginalScriptId: newScript.rootOriginalScriptId,
+            originalAuthorId: newScript.originalAuthorId,
+            derivativeOfScriptId: newScript.derivativeOfScriptId,
+        } as any);
+        try { updateUser(user); } catch (e) { console.error('更新用户收藏失败', e); }
+      }
+    }
+
+    return NextResponse.json({ success: true, script: newScript, diffRaw: raw, collected: true });
   } catch (e) {
     console.error('二次创作失败', e);
     return NextResponse.json({ success: false, error: '服务器错误' }, { status: 500 });
