@@ -18,17 +18,23 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
   const [preview, setPreview] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
 
-  useEffect(()=> {
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/scripts/${scriptId}`);
+  const load = async () => {
+    setLoading(true); setError('');
+    try {
+      const res = await fetch(`/api/scripts/${scriptId}`);
+      if (!res.ok) {
+        setError(`请求失败(${res.status})`);
+      } else {
         const data = await res.json();
         if (data.success) setBaseScript(data.script); else setError(data.error||'加载失败');
-      } catch { setError('网络错误'); }
-      setLoading(false);
-    };
-    load();
-  },[scriptId]);
+      }
+    } catch (e:any) {
+      setError('网络错误：可能是服务未启动或断开');
+    }
+    setLoading(false);
+  };
+
+  useEffect(()=> { load(); },[scriptId]);
 
   const applyRemix = async () => {
     if (!instructions.trim()) return;
@@ -67,7 +73,12 @@ export default function ScriptRemixModal({ scriptId, onClose, currentUser, onRem
           <div className="w-2/3 border-r border-gray-700 flex flex-col">
             <div className="p-4 overflow-y-auto text-sm text-gray-300 leading-relaxed space-y-6">
               {loading && <div>加载中...</div>}
-              {error && <div className="text-red-400">{error}</div>}
+              {error && (
+                <div className="space-y-2">
+                  <div className="text-red-400">{error}</div>
+                  <button onClick={load} className="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs text-white">重试</button>
+                </div>
+              )}
               {showScript && (
                 <>
                   <section>
